@@ -73,6 +73,18 @@ struct sixaxis_data {
 	uint16_t psm;
 };
 
+static bool input_device_profile_enabled = false;
+static sdp_record_t *input_device_profile_sdp_record = NULL;
+
+void set_input_device_profile_enabled(bool enabled){
+    input_device_profile_enabled=enabled;
+}
+
+void set_input_device_profile_sdp_record(sdp_record_t *rec){
+    input_device_profile_sdp_record = rec;
+}
+
+
 static void sixaxis_sdp_cb(struct btd_device *dev, int err, void *user_data)
 {
 	struct sixaxis_data *data = user_data;
@@ -315,6 +327,11 @@ int server_start(const bdaddr_t *src)
 		g_free(server);
 		return -1;
 	}
+
+	//add service record to SDP for input device profile
+    if (input_device_profile_enabled && adapter_service_add(adapter_find(src), input_device_profile_sdp_record) < 0) {
+        error("Failed to register input device service record");
+    }
 
 	servers = g_slist_append(servers, server);
 
