@@ -43,3 +43,5 @@ int input_device_close_channels(const bdaddr_t *src, const bdaddr_t *dst);
 
 int input_device_connect(struct btd_service *service);
 int input_device_disconnect(struct btd_service *service);
+
+int check_if_remote_device_is_input_host(const bdaddr_t *src, const bdaddr_t *dst);
