@@ -1377,6 +1377,7 @@ static const GDBusPropertyTable input_properties[] = {
 	{ }
 };
 
+//it is only for host profile - when this machine connects to remote device
 int input_device_register(struct btd_service *service)
 {
 	struct btd_device *device = btd_service_get_device(service);
@@ -1414,6 +1415,19 @@ int input_device_register(struct btd_service *service)
 	return 0;
 }
 
+int check_if_remote_device_is_input_host(const bdaddr_t *src,
+                                                const bdaddr_t *dst){
+    struct btd_device *device;
+    struct btd_service *service;
+
+    device = btd_adapter_find_device(adapter_find(src), dst, BDADDR_BREDR);
+    if (device == NULL)
+        return -1;
+
+    service = btd_device_get_service(device, HID_UUID);
+    return service == NULL ? 1 : 0;
+}
+
 static struct input_device *find_device(const bdaddr_t *src,
 					const bdaddr_t *dst)
 {
@@ -1431,6 +1445,7 @@ static struct input_device *find_device(const bdaddr_t *src,
 	return btd_service_get_user_data(service);
 }
 
+//it is only for host profile - when this machine connects to remote device
 void input_device_unregister(struct btd_service *service)
 {
 	struct btd_device *device = btd_service_get_device(service);
