@@ -7,13 +7,15 @@ Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
 Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
 
 
-This fork extends the input profile with input device support. now the profile can listen to BT input devices while presenting itself as an input device to other host machines.
+This fork extends the input profile with input device support. now the profile can listen to
+BT input devices while presenting itself as an input device to other host machines.
 
 added to input.conf
 InputDeviceProfileEnabled=[true/false]
 InputDeviceProfileSDPRecordPath=[path to sdp record xml file]
 
-after connection with input host machine is established the profile adds a dbus interface org.bluez.InputHost1 to the device object, 
-which contains the names of ctrl and intr channel sockets. 
+after connection with input host machine is established the profile adds a dbus interface 
+org.bluez.InputHost1 to the device object, which contains the names of ctrl and intr channel
+sockets. 
 
 if you connect to intr socket and white hid reports, those will be transmitted to the host
