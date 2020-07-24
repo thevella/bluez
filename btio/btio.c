@@ -164,7 +164,7 @@ static void accept_remove(struct accept *accept)
 	g_free(accept);
 }
 
-static gboolean check_nval(GIOChannel *io)
+gboolean check_nval(GIOChannel *io)
 {
 	struct pollfd fds;
 
