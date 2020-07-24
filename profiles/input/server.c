@@ -183,7 +183,7 @@ static void connect_event_cb(GIOChannel *chan, GError *err, gpointer data)
 	DBG("Incoming connection from %s on PSM %d", address, psm);
 
     int is_input_host = check_if_remote_device_is_input_host(&src, &dst);
-    if(is_input_host==1){
+    if(input_device_profile_enabled && is_input_host==1){
         DBG("Process %s as an input host", address);
         ret = input_host_set_channel(&src, &dst, psm, chan);
         if (ret == 0)
@@ -302,7 +302,7 @@ static void confirm_event_cb(GIOChannel *chan, gpointer user_data)
 
 drop:
 	input_device_close_channels(&src, &dst);
-    input_host_remove(&src, &dst);
+    if( input_device_profile_enabled) input_host_remove(&src, &dst);
 	g_io_channel_shutdown(chan, TRUE, NULL);
 }
 

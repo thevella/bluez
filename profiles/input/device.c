@@ -304,7 +304,7 @@ static bool hidp_recv_intr_data(GIOChannel *chan, struct input_device *idev)
 	uhid_send_input_report(idev, data + 1, len - 1);
 
 	return true;
-}
+}   
 
 static gboolean intr_watch_cb(GIOChannel *chan, GIOCondition cond, gpointer data)
 {
