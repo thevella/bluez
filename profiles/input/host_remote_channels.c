@@ -76,7 +76,8 @@ static gboolean ih_remote_channel_watch_cb(GIOChannel *chan, GIOCondition cond, 
         return TRUE;
     }
     DBG("Input host %s %s disconnected. Shutting down channels", is_control ? "ctrl":"intr", host->dst_address);
-    ih_shutdown_channels(host);
+    //ih_shutdown_channels(host);
+    ih_shutdown_remote_connections(host);
     return FALSE;
 }
 
