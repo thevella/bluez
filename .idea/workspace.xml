@@ -4,21 +4,7 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="BranchesTreeState">
-    <expand>
-      <path>
-        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
-        <item name="LOCAL_ROOT" type="e8cecc67:BranchNodeDescriptor" />
-      </path>
-      <path>
-        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
-        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
-      </path>
-      <path>
-        <item name="ROOT" type="e8cecc67:BranchNodeDescriptor" />
-        <item name="REMOTE_ROOT" type="e8cecc67:BranchNodeDescriptor" />
-        <item name="GROUP_NODE:origin" type="e8cecc67:BranchNodeDescriptor" />
-      </path>
-    </expand>
+    <expand />
     <select />
   </component>
   <component name="CMakeRunConfigurationManager" shouldGenerate="true" shouldDeleteObsolete="true">
@@ -30,14 +16,21 @@
     </configurations>
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="f75533fc-51f2-4302-9167-8e01173ae690" name="Default Changelist" comment="added connection/disconnection handling">
-      <change afterPath="$PROJECT_DIR$/profiles/input/dbus.c" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/profiles/input/dbus.h" afterDir="false" />
+    <list default="true" id="f75533fc-51f2-4302-9167-8e01173ae690" name="Default Changelist" comment="local sockets">
+      <change afterPath="$PROJECT_DIR$/profiles/input/device_local_channels.c" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/profiles/input/device_local_channels.h" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/profiles/input/host_local_channels.c" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/profiles/input/host_local_channels.h" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/profiles/input/host_remote_channels.c" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/profiles/input/host_remote_channels.h" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/profiles/input/input_common.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/android/cutils/properties.h" beforeDir="false" afterPath="$PROJECT_DIR$/android/cutils/properties.h" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/btio/btio.h" beforeDir="false" afterPath="$PROJECT_DIR$/btio/btio.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/Makefile.plugins" beforeDir="false" afterPath="$PROJECT_DIR$/Makefile.plugins" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/profiles/input/device.c" beforeDir="false" afterPath="$PROJECT_DIR$/profiles/input/device.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/profiles/input/device.h" beforeDir="false" afterPath="$PROJECT_DIR$/profiles/input/device.h" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/profiles/input/host.c" beforeDir="false" afterPath="$PROJECT_DIR$/profiles/input/host.c" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/profiles/input/host.h" beforeDir="false" afterPath="$PROJECT_DIR$/profiles/input/host.h" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/profiles/input/input.conf" beforeDir="false" afterPath="$PROJECT_DIR$/profiles/input/input.conf" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/profiles/input/manager.c" beforeDir="false" afterPath="$PROJECT_DIR$/profiles/input/manager.c" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/profiles/input/server.c" beforeDir="false" afterPath="$PROJECT_DIR$/profiles/input/server.c" afterDir="false" />
     </list>
@@ -61,7 +54,7 @@
     <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
     <property name="WebServerToolWindowFactoryState" value="false" />
     <property name="cf.first.check.clang-format" value="false" />
-    <property name="last_opened_file_path" value="$PROJECT_DIR$/src/bluetoothd" />
+    <property name="last_opened_file_path" value="$PROJECT_DIR$/profiles/input" />
     <property name="node.js.detected.package.eslint" value="true" />
     <property name="node.js.detected.package.tslint" value="true" />
     <property name="node.js.path.for.package.eslint" value="project" />
@@ -71,10 +64,10 @@
     <property name="nodejs_package_manager_path" value="npm" />
     <property name="settings.editor.selected.configurable" value="editor.preferences.fonts.default" />
   </component>
-  <component name="RunManager" selected="Makefile Application.Debug">
+  <component name="RunManager" selected="Makefile.Make all">
     <configuration name="Debug" type="CLionNativeAppRunConfigurationType" PROGRAM_PARAMS="-n -d -p time,input,autopair,policy,scanparam,deviceinfo" REDIRECT_INPUT="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="bluez" TARGET_NAME="Unnamed" CONFIG_NAME="Unnamed" version="1" RUN_PATH="$PROJECT_DIR$/src/bluetoothd">
       <method v="2">
-        <option name="RunConfigurationTask" enabled="true" run_configuration_name="Make all" run_configuration_type="MAKEFILE_TARGET_RUN_CONFIGURATION" />
+        <option name="RunConfigurationTask" enabled="true" />
       </method>
     </configuration>
     <configuration default="true" type="GradleAppRunConfiguration" factoryName="Application" REDIRECT_INPUT="false" PASS_PARENT_ENVS_2="true">
@@ -103,7 +96,11 @@
       <updated>1595187674895</updated>
       <workItem from="1595187676274" duration="83182000" />
       <workItem from="1595450584640" duration="2091000" />
-      <workItem from="1595485132243" duration="39112000" />
+      <workItem from="1595485132243" duration="41964000" />
+      <workItem from="1595609336304" duration="1508000" />
+      <workItem from="1595611140752" duration="6127000" />
+      <workItem from="1595617565650" duration="2094000" />
+      <workItem from="1595626202779" duration="27853000" />
     </task>
     <task id="LOCAL-00001" summary="clion config">
       <created>1595189622986</created>
@@ -133,7 +130,21 @@
       <option name="project" value="LOCAL" />
       <updated>1595407158182</updated>
     </task>
-    <option name="localTasksCounter" value="5" />
+    <task id="LOCAL-00005" summary="local sockets">
+      <created>1595588109047</created>
+      <option name="number" value="00005" />
+      <option name="presentableId" value="LOCAL-00005" />
+      <option name="project" value="LOCAL" />
+      <updated>1595588109047</updated>
+    </task>
+    <task id="LOCAL-00006" summary="local sockets">
+      <created>1595588223799</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1595588223799</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -142,11 +153,41 @@
   <component name="Vcs.Log.Tabs.Properties">
     <option name="TAB_STATES">
       <map>
+        <entry key="1">
+          <value>
+            <State>
+              <option name="SHOW_ONLY_AFFECTED_CHANGES" value="true" />
+              <option name="FILTERS">
+                <map>
+                  <entry key="branch">
+                    <value>
+                      <list>
+                        <option value="HEAD" />
+                      </list>
+                    </value>
+                  </entry>
+                  <entry key="roots">
+                    <value>
+                      <list>
+                        <option value="$PROJECT_DIR$" />
+                      </list>
+                    </value>
+                  </entry>
+                </map>
+              </option>
+            </State>
+          </value>
+        </entry>
         <entry key="MAIN">
           <value>
             <State />
           </value>
         </entry>
+      </map>
+    </option>
+    <option name="OPEN_GENERIC_TABS">
+      <map>
+        <entry key="1" value="TOOL_WINDOW" />
       </map>
     </option>
     <option name="oldMeFiltersMigrated" value="true" />
@@ -156,106 +197,129 @@
     <MESSAGE value="added input device config and sdp record registration" />
     <MESSAGE value="input host connection on control and interrupt channels, authorisation, shutdown and removal of the device on unsuccessful connection attempt" />
     <MESSAGE value="added connection/disconnection handling" />
-    <option name="LAST_COMMIT_MESSAGE" value="added connection/disconnection handling" />
+    <MESSAGE value="local sockets" />
+    <option name="LAST_COMMIT_MESSAGE" value="local sockets" />
   </component>
   <component name="WindowStateProjectService">
-    <state x="2079" y="132" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1595451684677">
+    <state x="2079" y="132" width="1084" height="710" key="#com.intellij.execution.impl.EditConfigurationsDialog" timestamp="1595626485464">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state x="317" y="156" key="#com.intellij.execution.impl.EditConfigurationsDialog/0.27.3840.1053@0.27.3840.1053" timestamp="1595415186263" />
-    <state x="2079" y="132" key="#com.intellij.execution.impl.EditConfigurationsDialog/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595451684677" />
+    <state x="2079" y="132" width="1084" height="710" key="#com.intellij.execution.impl.EditConfigurationsDialog/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595626485464" />
     <state x="198" y="134" key="#com.intellij.execution.impl.EditConfigurationsDialog/72.27.1528.873@72.27.1528.873" timestamp="1595189500431" />
     <state x="594" y="289" width="479" height="517" key="#com.intellij.tools.ToolEditorDialog" timestamp="1595188847108">
       <screen x="72" y="27" width="1528" height="873" />
     </state>
     <state x="594" y="289" width="479" height="517" key="#com.intellij.tools.ToolEditorDialog/72.27.1528.873@72.27.1528.873" timestamp="1595188847108" />
-    <state width="617" height="592" key="DebuggerActiveHint" timestamp="1595587888008">
+    <state width="617" height="592" key="DebuggerActiveHint" timestamp="1595674566617">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1106" height="577" key="DebuggerActiveHint/0.27.3840.1053@0.27.3840.1053" timestamp="1595415085133" />
-    <state width="617" height="592" key="DebuggerActiveHint/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595587888008" />
+    <state width="617" height="592" key="DebuggerActiveHint/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595674566617" />
     <state width="440" height="478" key="DebuggerActiveHint/72.27.1528.873@72.27.1528.873" timestamp="1595191355899" />
-    <state x="622" y="197" width="424" height="496" key="FileChooserDialogImpl" timestamp="1595189497098">
-      <screen x="72" y="27" width="1528" height="873" />
+    <state x="2092" y="127" width="1648" height="853" key="DiffContextDialog" timestamp="1595620433254">
+      <screen x="1920" y="0" width="1920" height="1080" />
     </state>
+    <state x="2092" y="127" width="1648" height="853" key="DiffContextDialog/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595620433254" />
+    <state x="2611" y="210" width="424" height="496" key="FileChooserDialogImpl" timestamp="1595691040485">
+      <screen x="1920" y="0" width="1920" height="1080" />
+    </state>
+    <state x="2611" y="210" key="FileChooserDialogImpl/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595691040485" />
     <state x="622" y="197" width="424" height="496" key="FileChooserDialogImpl/72.27.1528.873@72.27.1528.873" timestamp="1595189497098" />
-    <state width="1802" height="215" key="GridCell.Tab.0.bottom" timestamp="1595588006449">
+    <state width="1802" height="220" key="GridCell.Tab.0.bottom" timestamp="1595696359024">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1802" height="274" key="GridCell.Tab.0.bottom/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657025" />
-    <state width="1802" height="215" key="GridCell.Tab.0.bottom/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595588006449" />
+    <state width="1802" height="220" key="GridCell.Tab.0.bottom/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696359024" />
     <state width="1482" height="268" key="GridCell.Tab.0.bottom/72.27.1528.873@72.27.1528.873" timestamp="1595189739943" />
     <state width="1930" height="217" key="GridCell.Tab.0.bottom/72.27.1976.1125@72.27.1976.1125" timestamp="1595256701732" />
     <state width="1482" height="216" key="GridCell.Tab.0.bottom/72.27.2488.873@72.27.2488.873" timestamp="1595264505222" />
-    <state width="1802" height="215" key="GridCell.Tab.0.center" timestamp="1595588006449">
+    <state width="1802" height="220" key="GridCell.Tab.0.center" timestamp="1595696359024">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1802" height="274" key="GridCell.Tab.0.center/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657024" />
-    <state width="1802" height="215" key="GridCell.Tab.0.center/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595588006449" />
+    <state width="1802" height="220" key="GridCell.Tab.0.center/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696359024" />
     <state width="1482" height="268" key="GridCell.Tab.0.center/72.27.1528.873@72.27.1528.873" timestamp="1595189739943" />
     <state width="1930" height="217" key="GridCell.Tab.0.center/72.27.1976.1125@72.27.1976.1125" timestamp="1595256701731" />
     <state width="1482" height="216" key="GridCell.Tab.0.center/72.27.2488.873@72.27.2488.873" timestamp="1595264505221" />
-    <state width="1802" height="215" key="GridCell.Tab.0.left" timestamp="1595588006449">
+    <state width="1802" height="220" key="GridCell.Tab.0.left" timestamp="1595696359024">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1802" height="274" key="GridCell.Tab.0.left/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657024" />
-    <state width="1802" height="215" key="GridCell.Tab.0.left/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595588006449" />
+    <state width="1802" height="220" key="GridCell.Tab.0.left/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696359024" />
     <state width="1482" height="268" key="GridCell.Tab.0.left/72.27.1528.873@72.27.1528.873" timestamp="1595189739942" />
     <state width="1930" height="217" key="GridCell.Tab.0.left/72.27.1976.1125@72.27.1976.1125" timestamp="1595256701731" />
     <state width="1482" height="216" key="GridCell.Tab.0.left/72.27.2488.873@72.27.2488.873" timestamp="1595264505221" />
-    <state width="1802" height="215" key="GridCell.Tab.0.right" timestamp="1595588006449">
+    <state width="1802" height="220" key="GridCell.Tab.0.right" timestamp="1595696359024">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1802" height="274" key="GridCell.Tab.0.right/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657025" />
-    <state width="1802" height="215" key="GridCell.Tab.0.right/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595588006449" />
+    <state width="1802" height="220" key="GridCell.Tab.0.right/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696359024" />
     <state width="1482" height="268" key="GridCell.Tab.0.right/72.27.1528.873@72.27.1528.873" timestamp="1595189739943" />
     <state width="1930" height="217" key="GridCell.Tab.0.right/72.27.1976.1125@72.27.1976.1125" timestamp="1595256701731" />
     <state width="1482" height="216" key="GridCell.Tab.0.right/72.27.2488.873@72.27.2488.873" timestamp="1595264505222" />
-    <state width="1802" height="215" key="GridCell.Tab.1.bottom" timestamp="1595587943919">
+    <state width="1802" height="215" key="GridCell.Tab.1.bottom" timestamp="1595696315397">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1482" height="216" key="GridCell.Tab.1.bottom/0.27.2560.873@0.27.2560.873" timestamp="1595264716418" />
     <state width="1802" height="215" key="GridCell.Tab.1.bottom/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657021" />
-    <state width="1802" height="215" key="GridCell.Tab.1.bottom/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595587943919" />
+    <state width="1802" height="215" key="GridCell.Tab.1.bottom/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696315397" />
     <state width="1482" height="268" key="GridCell.Tab.1.bottom/72.27.1528.873@72.27.1528.873" timestamp="1595191099464" />
     <state width="1930" height="217" key="GridCell.Tab.1.bottom/72.27.1976.1125@72.27.1976.1125" timestamp="1595256675788" />
     <state width="1482" height="216" key="GridCell.Tab.1.bottom/72.27.2488.873@72.27.2488.873" timestamp="1595264505146" />
-    <state width="1802" height="215" key="GridCell.Tab.1.center" timestamp="1595587943919">
+    <state width="1802" height="215" key="GridCell.Tab.1.center" timestamp="1595696315397">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1482" height="216" key="GridCell.Tab.1.center/0.27.2560.873@0.27.2560.873" timestamp="1595264716418" />
     <state width="1802" height="215" key="GridCell.Tab.1.center/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657021" />
-    <state width="1802" height="215" key="GridCell.Tab.1.center/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595587943919" />
+    <state width="1802" height="215" key="GridCell.Tab.1.center/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696315397" />
     <state width="1482" height="268" key="GridCell.Tab.1.center/72.27.1528.873@72.27.1528.873" timestamp="1595191099464" />
     <state width="1930" height="217" key="GridCell.Tab.1.center/72.27.1976.1125@72.27.1976.1125" timestamp="1595256675788" />
     <state width="1482" height="216" key="GridCell.Tab.1.center/72.27.2488.873@72.27.2488.873" timestamp="1595264505146" />
-    <state width="1802" height="215" key="GridCell.Tab.1.left" timestamp="1595587943918">
+    <state width="1802" height="215" key="GridCell.Tab.1.left" timestamp="1595696315397">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1482" height="216" key="GridCell.Tab.1.left/0.27.2560.873@0.27.2560.873" timestamp="1595264716417" />
     <state width="1802" height="215" key="GridCell.Tab.1.left/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657021" />
-    <state width="1802" height="215" key="GridCell.Tab.1.left/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595587943918" />
+    <state width="1802" height="215" key="GridCell.Tab.1.left/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696315397" />
     <state width="1482" height="268" key="GridCell.Tab.1.left/72.27.1528.873@72.27.1528.873" timestamp="1595191099463" />
     <state width="1930" height="217" key="GridCell.Tab.1.left/72.27.1976.1125@72.27.1976.1125" timestamp="1595256675787" />
     <state width="1482" height="216" key="GridCell.Tab.1.left/72.27.2488.873@72.27.2488.873" timestamp="1595264505146" />
-    <state width="1802" height="215" key="GridCell.Tab.1.right" timestamp="1595587943919">
+    <state width="1802" height="215" key="GridCell.Tab.1.right" timestamp="1595696315397">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state width="1482" height="216" key="GridCell.Tab.1.right/0.27.2560.873@0.27.2560.873" timestamp="1595264716418" />
     <state width="1802" height="215" key="GridCell.Tab.1.right/0.27.3840.1053@0.27.3840.1053" timestamp="1595449657021" />
-    <state width="1802" height="215" key="GridCell.Tab.1.right/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595587943919" />
+    <state width="1802" height="215" key="GridCell.Tab.1.right/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696315397" />
     <state width="1482" height="268" key="GridCell.Tab.1.right/72.27.1528.873@72.27.1528.873" timestamp="1595191099464" />
     <state width="1930" height="217" key="GridCell.Tab.1.right/72.27.1976.1125@72.27.1976.1125" timestamp="1595256675788" />
     <state width="1482" height="216" key="GridCell.Tab.1.right/72.27.2488.873@72.27.2488.873" timestamp="1595264505146" />
+    <state x="2499" y="290" width="824" height="533" key="IDE.errors.dialog" timestamp="1595679066314">
+      <screen x="1920" y="0" width="1920" height="1080" />
+    </state>
+    <state x="2499" y="290" width="824" height="533" key="IDE.errors.dialog/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595679066314" />
     <state x="596" y="112" width="1022" height="737" key="SettingsEditor" timestamp="1595193112857">
       <screen x="72" y="27" width="3128" height="1773" />
     </state>
     <state x="328" y="69" width="1016" height="742" key="SettingsEditor/72.27.1528.873@72.27.1528.873" timestamp="1595189487899" />
     <state x="596" y="112" width="1022" height="737" key="SettingsEditor/72.27.3128.1773@72.27.3128.1773" timestamp="1595193112857" />
-    <state x="590" y="79" width="778" height="780" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser" timestamp="1595402274645">
-      <screen x="0" y="27" width="3840" height="1053" />
+    <state x="2092" y="127" width="1648" height="853" key="ShowDiffWithBranchDialog" timestamp="1595609143795">
+      <screen x="1920" y="0" width="1920" height="1080" />
+    </state>
+    <state x="2092" y="127" width="1648" height="853" key="ShowDiffWithBranchDialog/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595609143795" />
+    <state x="2511" y="289" width="800" height="535" key="Vcs.Push.Dialog.v2" timestamp="1595605190837">
+      <screen x="1920" y="0" width="1920" height="1080" />
+    </state>
+    <state x="2511" y="289" width="800" height="535" key="Vcs.Push.Dialog.v2/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595605190837" />
+    <state x="2092" y="127" width="1648" height="853" key="com.intellij.history.integration.ui.views.DirectoryHistoryDialog" timestamp="1595617917548">
+      <screen x="1920" y="0" width="1920" height="1080" />
+    </state>
+    <state x="2092" y="127" width="1648" height="853" key="com.intellij.history.integration.ui.views.DirectoryHistoryDialog/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595617917548" />
+    <state x="2215" y="53" width="778" height="780" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser" timestamp="1595613198512">
+      <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state x="590" y="79" width="778" height="780" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser/0.27.3840.1053@0.27.3840.1053" timestamp="1595402274645" />
+    <state x="2215" y="53" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595613198512" />
     <state x="454" y="70" width="778" height="785" key="com.intellij.openapi.editor.actions.MultiplePasteAction$ClipboardContentChooser/72.27.2488.873@72.27.2488.873" timestamp="1595260324753" />
     <state x="720" y="237" key="com.intellij.tools.ToolSelectDialog.dimensionServiceKey" timestamp="1595189484773">
       <screen x="72" y="27" width="1528" height="873" />
@@ -266,35 +330,49 @@
     </state>
     <state x="2111" y="488" width="938" height="583" key="com.intellij.xdebugger.impl.breakpoints.ui.BreakpointsDialogFactory$2/0.27.3840.1053@0.27.3840.1053" timestamp="1595449584520" />
     <state x="2892" y="473" width="938" height="569" key="com.intellij.xdebugger.impl.breakpoints.ui.BreakpointsDialogFactory$2/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595532211782" />
-    <state x="2941" y="279" width="783" height="648" key="find.popup" timestamp="1595580541739">
+    <state x="2941" y="279" width="783" height="648" key="find.popup" timestamp="1595696346780">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state x="1361" y="253" width="1043" height="523" key="find.popup/0.27.2560.873@0.27.2560.873" timestamp="1595265058553" />
     <state x="2042" y="299" width="1565" height="631" key="find.popup/0.27.3840.1053@0.27.3840.1053" timestamp="1595447633126" />
     <state x="2110" y="318" width="1617" height="674" key="find.popup/0.27.3968.1125@0.27.3968.1125" timestamp="1595274721049" />
-    <state x="2941" y="279" width="783" height="648" key="find.popup/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595580541739" />
+    <state x="2941" y="279" width="783" height="648" key="find.popup/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595696346780" />
     <state x="525" y="200" width="621" height="522" key="find.popup/72.27.1528.873@72.27.1528.873" timestamp="1595191685355" />
     <state x="658" y="250" width="804" height="673" key="find.popup/72.27.1976.1125@72.27.1976.1125" timestamp="1595256491079" />
     <state x="339" y="192" width="1013" height="523" key="find.popup/72.27.2488.873@72.27.2488.873" timestamp="1595264381871" />
+    <state x="2707" y="454" width="408" height="206" key="git4idea.remote.GitConfigureRemotesDialog" timestamp="1595605148165">
+      <screen x="1920" y="0" width="1920" height="1080" />
+    </state>
+    <state x="2707" y="454" width="408" height="206" key="git4idea.remote.GitConfigureRemotesDialog/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595605148165" />
     <state x="724" y="267" key="run.anything.popup" timestamp="1595252778520">
       <screen x="72" y="27" width="1976" height="1125" />
     </state>
     <state x="724" y="267" key="run.anything.popup/72.27.1976.1125@72.27.1976.1125" timestamp="1595252778520" />
-    <state x="3070" y="236" width="672" height="653" key="search.everywhere.popup" timestamp="1595580478554">
+    <state x="3070" y="236" width="672" height="653" key="search.everywhere.popup" timestamp="1595683881992">
       <screen x="1920" y="0" width="1920" height="1080" />
     </state>
     <state x="1227" y="222" width="871" height="527" key="search.everywhere.popup/0.27.2560.873@0.27.2560.873" timestamp="1595265239472" />
     <state x="2300" y="257" width="1307" height="636" key="search.everywhere.popup/0.27.3840.1053@0.27.3840.1053" timestamp="1595428318884" />
-    <state x="3070" y="236" width="672" height="653" key="search.everywhere.popup/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595580478554" />
+    <state x="3070" y="236" width="672" height="653" key="search.everywhere.popup/1920.0.1920.1080/0.27.1920.1053@1920.0.1920.1080" timestamp="1595683881992" />
     <state x="723" y="273" width="672" height="678" key="search.everywhere.popup/72.27.1976.1125@72.27.1976.1125" timestamp="1595257081106" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
       <breakpoints>
         <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
-          <url>file://$PROJECT_DIR$/profiles/input/host.c</url>
-          <line>333</line>
-          <option name="timeStamp" value="96" />
+          <url>file://$PROJECT_DIR$/tools/btmgmt.c</url>
+          <line>526</line>
+          <option name="timeStamp" value="115" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/tools/btmgmt.c</url>
+          <line>2133</line>
+          <option name="timeStamp" value="116" />
+        </line-breakpoint>
+        <line-breakpoint enabled="true" type="com.jetbrains.cidr.execution.debugger.OCBreakpointType">
+          <url>file://$PROJECT_DIR$/profiles/input/device.c</url>
+          <line>229</line>
+          <option name="timeStamp" value="126" />
         </line-breakpoint>
       </breakpoints>
     </breakpoint-manager>
