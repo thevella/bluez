@@ -19,3 +19,11 @@ org.bluez.InputHost1 to the device object, which contains the names of ctrl and 
 sockets. 
 
 if you connect to intr socket and white hid reports, those will be transmitted to the host
+
+CaptureUHIDChannelsForInputDevices and ExclusiveCaptureOfUHIDChannelsForInputDevices allow 
+to create similar sockets to capture bluetooth devices communications, possibly exclusively 
+(bypassing machine)
+
+Examples folder contains a working example of a python gateway, which connects to input profile 
+sockets for input devices and hosts and transmits messages both ways. E.g. Key remapping can happen
+in such gateway
