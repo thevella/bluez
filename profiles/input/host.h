@@ -63,5 +63,6 @@ struct input_host{
 int input_host_set_channel(const bdaddr_t *src, const bdaddr_t *dst, int psm, GIOChannel *io);
 int input_host_remove(const bdaddr_t *src, const bdaddr_t *dst);
 void ih_shutdown_channels(struct input_host *host);
+int input_host_reconnect(struct input_host *host);
 
 #endif //BLUEZ_INPUT_HOST_H

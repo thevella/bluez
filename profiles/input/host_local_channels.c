@@ -175,8 +175,14 @@ static bool ih_receive_data_from_local(GIOChannel *chan, struct input_host *host
         return TRUE;
     }
 
+    GIOChannel *rchan = is_control ? host->ctrl_io_remote_connection : host->intr_io_remote_connection;
+    if (!rchan) {
+        DBG("BT socket not connected. Trying to re-connect with input host");
+        input_host_reconnect(host);
+        return TRUE;
+    }
     //send data  remote
-    ih_send_data_to_remote(is_control ? host->ctrl_io_remote_connection : host->intr_io_remote_connection, data, len);
+    ih_send_data_to_remote(rchan, data, len);
     return TRUE;
 }
 

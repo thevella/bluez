@@ -9,7 +9,8 @@
 
 #define INPUT_HOST_INTERFACE "org.bluez.InputHost1"
 
-
+static void ih_remote_control_reconnect_cb(GIOChannel *chan, GError *conn_err, gpointer user_data);
+static void ih_remote_interrupt_reconnect_cb(GIOChannel *chan, GError *conn_err, gpointer user_data);
 
 static GSList* hosts = NULL;
 
@@ -68,7 +69,10 @@ static gboolean device_property_state_changed(DBusConnection *conn, DBusMessage 
     }
     else {
         bool connected = btd_device_is_connected(host->device);
-        if (!connected) ih_shutdown_channels(host);
+        if (!connected) {
+            ih_shutdown_remote_connections(host);
+            //ih_shutdown_channels(host);
+        }
     }
     return TRUE;
 }
@@ -152,7 +156,82 @@ int input_host_set_channel(const bdaddr_t *src, const bdaddr_t *dst, int psm, GI
         register_socket_and_dbus_interface(host);
     }
     return 0;
+}
 
+int input_host_reconnect(struct input_host *host)
+{
+    GError *err = NULL;
+    GIOChannel *io;
+
+    io = bt_io_connect(ih_remote_control_reconnect_cb, host,
+                       NULL, &err,
+                       BT_IO_OPT_SOURCE_BDADDR, &host->src,
+                       BT_IO_OPT_DEST_BDADDR, &host->dst,
+                       BT_IO_OPT_PSM, L2CAP_PSM_HIDP_CTRL,
+                       BT_IO_OPT_SEC_LEVEL, BT_IO_SEC_MEDIUM,
+                       BT_IO_OPT_INVALID);
+    host->ctrl_io_remote_connection = io;
+
+    if (err == NULL)
+        return 0;
+
+    error("%s", err->message);
+    g_error_free(err);
+    return -EIO;
+}
+
+static void ih_remote_control_reconnect_cb(GIOChannel *chan, GError *conn_err, gpointer user_data)
+{
+    struct input_host *host = user_data;
+    GIOCondition cond = G_IO_IN | G_IO_PRI | G_IO_HUP | G_IO_ERR | G_IO_NVAL;
+    GIOChannel *io;
+    GError *err = NULL;
+
+    if (conn_err) {
+        error("%s", conn_err->message);
+        ih_shutdown_remote_connections(host);
+        return;
+    }
+
+    /* Connect to the HID interrupt channel */
+    io = bt_io_connect(ih_remote_interrupt_reconnect_cb, host,
+                       NULL, &err,
+                       BT_IO_OPT_SOURCE_BDADDR, &host->src,
+                       BT_IO_OPT_DEST_BDADDR, &host->dst,
+                       BT_IO_OPT_PSM, L2CAP_PSM_HIDP_INTR,
+                       BT_IO_OPT_SEC_LEVEL, BT_IO_SEC_MEDIUM,
+                       BT_IO_OPT_INVALID);
+    if (!io) {
+        error("%s", err->message);
+        g_error_free(err);
+        ih_shutdown_remote_connections(host);
+        return;
+    }
+
+    host->intr_io_remote_connection = io;
+
+    host->ctrl_io_remote_connection_watch = g_io_add_watch(host->ctrl_io_remote_connection, cond, ih_remote_control_watch_cb, host);
+}
+
+static void ih_remote_interrupt_reconnect_cb(GIOChannel *chan, GError *conn_err, gpointer user_data)
+{
+    struct input_host *host = user_data;
+    GIOCondition cond = G_IO_IN | G_IO_PRI | G_IO_HUP | G_IO_ERR | G_IO_NVAL;
+    int err;
+
+    if (conn_err) {
+        err = -EIO;
+        ih_shutdown_remote_connections(host);
+        return;
+    }
+
+    if (host->intr_io_remote_connection == NULL || host->ctrl_io_remote_connection == NULL) {
+        ih_shutdown_remote_connections(host);
+        return;
+    }
+
+    host->intr_io_remote_connection_watch = g_io_add_watch(host->intr_io_remote_connection, cond,
+                                                           ih_remote_interrupt_watch_cb, host);
 }
 
 
