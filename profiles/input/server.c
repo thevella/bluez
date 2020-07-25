@@ -33,14 +33,13 @@
 #include <dbus/dbus.h>
 
 #include "lib/bluetooth.h"
-#include "lib/sdp.h"
 #include "lib/uuid.h"
 
-#include "src/log.h"
-#include "src/uuid-helper.h"
 #include "btio/btio.h"
-#include "src/adapter.h"
-#include "src/device.h"
+
+#include "input_common.h"
+#include "src/uuid-helper.h"
+
 #include "src/profile.h"
 
 #include "sixaxis.h"
@@ -339,7 +338,7 @@ int server_start(const bdaddr_t *src)
 		error("Failed to listen on interrupt channel");
 		g_io_channel_unref(server->ctrl);
 		g_error_free(err);
-		g_free(server);
+		g_free(server);\
 		return -1;
 	}
 

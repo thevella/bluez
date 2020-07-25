@@ -120,7 +120,7 @@ static int input_init(void)
 	config = load_config_file(CONFIGDIR "/input.conf");
 	if (config) {
 		int idle_timeout;
-		gboolean uhid_enabled, classic_bonded_only, auto_sec, input_device_profile_enabled;
+		gboolean uhid_enabled, classic_bonded_only, auto_sec, input_device_profile_enabled, capture_uhid_channels_for_devices, capture_uhid_channels_for_devices_exclusively;
 		char* str;
 
 		idle_timeout = g_key_file_get_integer(config, "General",
@@ -192,7 +192,29 @@ static int input_init(void)
             }
         }
 
-	}
+        if(uhid_enabled) {
+            capture_uhid_channels_for_devices = g_key_file_get_boolean(config, "General",
+                                                                       "CaptureUHIDChannelsForInputDevices", &err);
+            if (!err) {
+                DBG("input.conf: CaptureUHIDChannelsForInputDevices=%s",
+                    capture_uhid_channels_for_devices ? "true" : "false");
+                input_device_set_capture_uhid_channels_for_devices(capture_uhid_channels_for_devices);
+            } else
+                g_clear_error(&err);
+
+            if(capture_uhid_channels_for_devices) {
+                capture_uhid_channels_for_devices_exclusively = g_key_file_get_boolean(config, "General",
+                                                                           "ExclusiveCaptureOfUHIDChannelsForInputDevices", &err);
+                if (!err) {
+                    DBG("input.conf: ExclusiveCaptureOfUHIDChannelsForInputDevices=%s",
+                        capture_uhid_channels_for_devices_exclusively ? "true" : "false");
+                    input_device_set_capture_uhid_channels_for_devices_exclusively(capture_uhid_channels_for_devices_exclusively);
+                } else
+                    g_clear_error(&err);
+            }
+        }
+
+    }
 
 	btd_profile_register(&input_profile);
 
