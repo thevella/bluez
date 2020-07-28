@@ -3202,6 +3202,17 @@ static gboolean property_get_roles(const GDBusPropertyTable *property,
 	return TRUE;
 }
 
+static gboolean property_get_version(const GDBusPropertyTable *property,
+                                  DBusMessageIter *iter, void *user_data)
+{
+    const char *str = "Hacked";
+
+    dbus_message_iter_append_basic(iter, DBUS_TYPE_STRING, &str);
+
+    return TRUE;
+}
+
+
 static int device_path_cmp(gconstpointer a, gconstpointer b)
 {
 	const struct btd_device *device = a;
@@ -3483,6 +3494,7 @@ static const GDBusPropertyTable adapter_properties[] = {
 	{ "Modalias", "s", property_get_modalias, NULL,
 					property_exists_modalias },
 	{ "Roles", "as", property_get_roles },
+    { "Version", "s", property_get_version },
 	{ }
 };
 

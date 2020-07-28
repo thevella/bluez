@@ -34,6 +34,7 @@ struct input_host{
     GIOChannel		*intr_io_remote_connection;
     guint			ctrl_io_remote_connection_watch;
     guint			intr_io_remote_connection_watch;
+    bool            dbus_interface_registered;
     gchar			*socket_path_ctrl;
     gchar			*socket_path_intr;
     GIOChannel      *ctrl_io_local_listener;
@@ -44,6 +45,7 @@ struct input_host{
     guint           intr_io_local_listener_watch;
     GIOChannel      *intr_io_local_connection;
     guint           intr_io_local_connection_watch;
+    gint64			reconnect_attempt_start;
 
 
 /*

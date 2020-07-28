@@ -1283,6 +1283,7 @@ static void input_device_enter_reconnect_mode(struct input_device *idev)
 					btd_device_is_connected(idev->device))
 		return;
 
+
 	if (idev->reconnect_timer > 0)
 		g_source_remove(idev->reconnect_timer);
 
