@@ -46,12 +46,15 @@ static void register_socket_and_dbus_interface(struct input_host *host){
         return;
     }
 
-    if (g_dbus_register_interface(btd_get_dbus_connection(),
-                                  host->path, INPUT_HOST_INTERFACE,
-                                  NULL, NULL,
-                                  input_properties, host,
-                                  NULL) == FALSE) {
-        error("Unable to register %s interface", INPUT_HOST_INTERFACE);
+    if(!host->dbus_interface_registered) {
+        if (g_dbus_register_interface(btd_get_dbus_connection(),
+                                      host->path, INPUT_HOST_INTERFACE,
+                                      NULL, NULL,
+                                      input_properties, host,
+                                      NULL) == FALSE) {
+            error("Unable to register %s interface", INPUT_HOST_INTERFACE);
+        }
+        else host->dbus_interface_registered=true;
     }
 }
 
@@ -84,6 +87,7 @@ static struct input_host *create_input_host(const bdaddr_t *src, const bdaddr_t 
     const char *path = device_get_path(device);
     struct input_host *new_host = g_new0(struct input_host, 1);
     new_host->path = g_strdup(path);
+    new_host->dbus_interface_registered = false;
     bacpy(&new_host->src, src);
     bacpy(&new_host->dst, dst);
     ba2str(&new_host->dst, new_host->dst_address);
@@ -163,6 +167,23 @@ int input_host_reconnect(struct input_host *host)
     GError *err = NULL;
     GIOChannel *io;
 
+    /* Make sure the device is bonded if required */
+    if (!device_is_bonded(host->device, btd_device_get_bdaddr_type(host->device)))
+        return -EIO;
+
+        /* If the device is temporary we are not required to reconnect
+     * with the device. This is likely the case of a removing device.
+     */
+    if (device_is_temporary(host->device) ||
+        btd_device_is_connected(host->device) || host->ctrl_io_remote_connection)
+        return -EALREADY;
+
+
+    if (g_get_real_time() < host->reconnect_attempt_start + 20000000) // 20 sec throttle
+        return -EALREADY; //already reconnecting
+
+    host->reconnect_attempt_start = g_get_real_time();
+
     io = bt_io_connect(ih_remote_control_reconnect_cb, host,
                        NULL, &err,
                        BT_IO_OPT_SOURCE_BDADDR, &host->src,
@@ -236,8 +257,11 @@ static void ih_remote_interrupt_reconnect_cb(GIOChannel *chan, GError *conn_err,
 
 
 void ih_shutdown_channels(struct input_host *host){
-    g_dbus_unregister_interface(btd_get_dbus_connection(),
-                                host->path, INPUT_HOST_INTERFACE);
+    if(host->dbus_interface_registered) {
+        g_dbus_unregister_interface(btd_get_dbus_connection(),
+                                    host->path, INPUT_HOST_INTERFACE);
+        host->dbus_interface_registered = false;
+    }
     ih_shutdown_remote_connections(host);
     ih_shutdown_local_connections(host);
     ih_shutdown_local_listeners(host);
