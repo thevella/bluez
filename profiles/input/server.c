@@ -180,8 +180,13 @@ static void connect_event_cb(GIOChannel *chan, GError *err, gpointer data)
 
 	ba2str(&dst, address);
 	DBG("Incoming connection from %s on PSM %d", address, psm);
-
+    DBG("Checking that services resolved");
     int is_input_host = check_if_remote_device_is_input_host(&src, &dst);
+    if(is_input_host ==-2) {
+        //services not resolved yet. refusing connection on input psm - cannot understand if this is device or host
+        error("Refusing input host connect: services not resolved yet");
+        return;
+    }
     if(input_device_profile_enabled && is_input_host==1){
         DBG("Process %s as an input host", address);
         ret = input_host_set_channel(&src, &dst, psm, chan);
