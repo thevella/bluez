@@ -55,6 +55,7 @@ struct input_device {
     uint8_t			report_req_pending;
     guint			report_req_timer;
     uint32_t		report_rsp_id;
+    bool			virtual_cable_unplug;
 
     gchar			*socket_path_ctrl;
     gchar			*socket_path_intr;
