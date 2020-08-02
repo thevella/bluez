@@ -747,6 +747,12 @@ gboolean device_is_trusted(struct btd_device *device)
 	return device->trusted;
 }
 
+bool device_is_svc_resolved(struct btd_device *device)
+{
+    return (device->bredr_state.svc_resolved || device->le_state.svc_resolved);
+}
+
+
 static gboolean dev_property_get_address(const GDBusPropertyTable *property,
 					DBusMessageIter *iter, void *data)
 {
