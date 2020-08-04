@@ -141,7 +141,7 @@ static gboolean ih_local_channel_watch_cb(GIOChannel *io, GIOCondition cond,
                                gpointer user_data, bool is_control) {
     struct input_host *host = user_data;
     if (cond == G_IO_IN || cond == G_IO_PRI || cond == (G_IO_IN | G_IO_PRI)) {
-        DBG("local %s data is in for host", is_control ? "ctrl":"intr");
+        //DBG("local %s data is in for host", is_control ? "ctrl":"intr");
         ih_receive_data_from_local(io, host, is_control);
         return TRUE;
     }

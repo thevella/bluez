@@ -67,7 +67,7 @@ static bool ih_receive_data_from_remote(GIOChannel *chan, struct input_host *hos
 static gboolean ih_remote_channel_watch_cb(GIOChannel *chan, GIOCondition cond, gpointer data, bool is_control) {
     struct input_host *host = data;
     if (cond == G_IO_IN || cond == G_IO_PRI || cond == (G_IO_IN | G_IO_PRI)) {
-        DBG("%s data is in ", is_control ? "ctrl":"intr");
+        //DBG("%s data is in ", is_control ? "ctrl":"intr");
         ih_receive_data_from_remote(chan, host, is_control);
         return TRUE;
     }
