@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2018-2019  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
  *
  */
 
@@ -34,7 +25,7 @@
 
 #define MAX_FRND_GROUPS		20
 #define FRND_RELAY_WINDOW	250		/* 250 ms */
-#define FRND_CACHE_SIZE		16
+#define FRND_CACHE_SIZE		FRND_CACHE_MAX
 #define FRND_SUB_LIST_SIZE	8
 
 #define RESPONSE_DELAY		(100 - 12)	/*  100  ms - 12ms hw delay */
@@ -68,7 +59,7 @@ static void response_delay(struct l_timeout *timeout, void *user_data)
 {
 	struct mesh_friend *neg = user_data;
 	uint16_t net_idx = neg->net_idx;
-	uint32_t key_id, seq;
+	uint32_t net_key_id, seq;
 	uint8_t msg[8];
 	uint16_t n = 0;
 	bool res;
@@ -76,11 +67,11 @@ static void response_delay(struct l_timeout *timeout, void *user_data)
 	l_timeout_remove(timeout);
 
 	/* Create key Set for this offer */
-	res = mesh_net_get_key(neg->net, false, net_idx, &key_id);
+	res = mesh_net_get_key(neg->net, false, net_idx, &net_key_id);
 	if (!res)
 		goto cleanup;
 
-	neg->net_key_cur = net_key_frnd_add(key_id, neg->lp_addr,
+	neg->net_key_cur = net_key_frnd_add(net_key_id, neg->lp_addr,
 						mesh_net_get_address(neg->net),
 						neg->lp_cnt, counter);
 	if (!neg->net_key_cur)
@@ -97,7 +88,7 @@ static void response_delay(struct l_timeout *timeout, void *user_data)
 	n += 2;
 	seq = mesh_net_next_seq_num(neg->net);
 	print_packet("Tx-NET_OP_FRND_OFFER", msg, n);
-	mesh_net_transport_send(neg->net, key_id, 0,
+	mesh_net_transport_send(neg->net, net_key_id, 0,
 			mesh_net_get_iv_index(neg->net), 0,
 			seq, 0, neg->lp_addr,
 			msg, n);

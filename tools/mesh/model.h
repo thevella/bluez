@@ -1,19 +1,9 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2019  Intel Corporation. All rights reserved.
- *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
  *
  *
  */
@@ -35,14 +25,17 @@ typedef int (*model_bind_func_t)(uint16_t app_idx, int action);
 
 struct model_pub {
 	uint16_t app_idx;
+	uint16_t period;
 	union {
-		uint16_t addr16;
-		uint8_t va_128[16];
+		uint16_t addr;
+		uint8_t label[16];
 	} u;
+	bool cred;
+	uint32_t prd_res;
+	uint16_t rtx_interval;
+	uint8_t prd_steps;
+	uint8_t rtx_cnt;
 	uint8_t ttl;
-	uint8_t credential;
-	uint8_t period;
-	uint8_t retransmit;
 };
 
 typedef int (*model_pub_func_t)(struct model_pub *pub);

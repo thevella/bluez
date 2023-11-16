@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -89,7 +76,7 @@ static const char *filename = NULL;
 static const char *savefile = NULL;
 static int save_fd = -1;
 
-static int master = 0;
+static int central = 0;
 static int auth = 0;
 static int encr = 0;
 static int secure = 0;
@@ -107,7 +94,7 @@ static float tv2fl(struct timeval tv)
 static uint8_t get_channel(const char *svr, uint16_t uuid)
 {
 	sdp_session_t *sdp;
-	sdp_list_t *srch, *attrs, *rsp, *protos;
+	sdp_list_t *srch, *attrs, *rsp, *protos = NULL;
 	uuid_t svclass;
 	uint16_t attr;
 	bdaddr_t dst;
@@ -215,7 +202,7 @@ static int do_connect(const char *svr)
 
 	/* Set link mode */
 	opt = 0;
-	if (master)
+	if (central)
 		opt |= RFCOMM_LM_MASTER;
 	if (auth)
 		opt |= RFCOMM_LM_AUTH;
@@ -306,7 +293,7 @@ static void do_listen(void (*handler)(int sk))
 
 	/* Set link mode */
 	opt = 0;
-	if (master)
+	if (central)
 		opt |= RFCOMM_LM_MASTER;
 	if (auth)
 		opt |= RFCOMM_LM_AUTH;
@@ -513,8 +500,9 @@ static void recv_mode(int sk)
 					timestamp = 0;
 					memset(ts, 0, sizeof(ts));
 				} else {
-					sprintf(ts, "[%ld.%ld] ",
-							tv.tv_sec, tv.tv_usec);
+					sprintf(ts, "[%lld.%lld] ",
+							(long long)tv.tv_sec,
+							(long long)tv.tv_usec);
 				}
 			}
 
@@ -644,8 +632,7 @@ static void automated_send_recv()
 			do_listen(recv_mode);
 		}
 
-		save_fd = open(savefile, O_CREAT | O_WRONLY,
-						S_IRUSR | S_IWUSR);
+		save_fd = open(savefile, O_CREAT | O_WRONLY, 0600);
 		if (save_fd < 0)
 			syslog(LOG_ERR, "Failed to open file to save data");
 
@@ -699,7 +686,7 @@ static void usage(void)
 		"\t[-A] request authentication\n"
 		"\t[-E] request encryption\n"
 		"\t[-S] secure connection\n"
-		"\t[-M] become master\n"
+		"\t[-M] become central\n"
 		"\t[-T] enable timestamps\n");
 }
 
@@ -711,7 +698,8 @@ int main(int argc, char *argv[])
 	bacpy(&bdaddr, BDADDR_ANY);
 	bacpy(&auto_bdaddr, BDADDR_ANY);
 
-	while ((opt=getopt(argc,argv,"rdscuwmna:b:i:P:U:B:O:N:MAESL:W:C:D:Y:T")) != EOF) {
+	while ((opt = getopt(argc, argv,
+			"rdscuwmna:b:i:P:U:B:O:N:MAESL:W:C:D:Y:T")) != EOF) {
 		switch (opt) {
 		case 'r':
 			mode = RECV;
@@ -784,7 +772,7 @@ int main(int argc, char *argv[])
 			break;
 
 		case 'M':
-			master = 1;
+			central = 1;
 			break;
 
 		case 'A':

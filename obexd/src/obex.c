@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  OBEX Server
@@ -5,20 +6,6 @@
  *  Copyright (C) 2007-2010  Nokia Corporation
  *  Copyright (C) 2007-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -53,6 +40,7 @@
 #include "mimetype.h"
 #include "service.h"
 #include "transport.h"
+#include "src/shared/util.h"
 
 typedef struct {
 	uint8_t  version;
@@ -158,7 +146,7 @@ static void os_reset_session(struct obex_session *os)
 		os->path = NULL;
 	}
 	if (os->apparam) {
-		g_free(os->apparam);
+		free(os->apparam);
 		os->apparam = NULL;
 		os->apparam_len = 0;
 	}
@@ -607,7 +595,7 @@ static void parse_apparam(struct obex_session *os, GObexPacket *req)
 	if (!g_obex_header_get_bytes(hdr, &apparam, &len))
 		return;
 
-	os->apparam = g_memdup(apparam, len);
+	os->apparam = util_memdup(apparam, len);
 	os->apparam_len = len;
 	DBG("APPARAM");
 }

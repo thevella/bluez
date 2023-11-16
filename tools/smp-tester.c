@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2013  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -95,7 +82,7 @@ struct smp_data {
 	bool sc;
 };
 
-static void mgmt_debug(const char *str, void *user_data)
+static void print_debug(const char *str, void *user_data)
 {
 	const char *prefix = user_data;
 
@@ -200,6 +187,9 @@ static void read_index_list_callback(uint8_t status, uint16_t length,
 		tester_pre_setup_failed();
 	}
 
+	if (tester_use_debug())
+		hciemu_set_debug(data->hciemu, print_debug, "hciemu: ", NULL);
+
 	tester_print("New hciemu instance created");
 }
 
@@ -223,7 +213,7 @@ static void test_pre_setup(const void *test_data)
 	}
 
 	if (tester_use_debug())
-		mgmt_set_debug(data->mgmt, mgmt_debug, "mgmt: ", NULL);
+		mgmt_set_debug(data->mgmt, print_debug, "mgmt: ", NULL);
 
 	mgmt_send(data->mgmt, MGMT_OP_READ_INDEX_LIST, MGMT_INDEX_NONE, 0, NULL,
 					read_index_list_callback, NULL, NULL);
@@ -511,6 +501,10 @@ static void setup_powered_client(const void *test_data)
 	const struct smp_data *smp = data->test_data;
 	unsigned char param[] = { 0x01 };
 
+	mgmt_register(data->mgmt, MGMT_EV_USER_CONFIRM_REQUEST,
+			data->mgmt_index, user_confirm_request_callback,
+			data, NULL);
+
 	tester_print("Powering on controller");
 
 	mgmt_send(data->mgmt, MGMT_OP_SET_LE, data->mgmt_index,
@@ -771,11 +765,11 @@ static void smp_new_conn(uint16_t handle, void *user_data)
 
 static void init_bdaddr(struct test_data *data)
 {
-	const uint8_t *master_bdaddr, *client_bdaddr;
+	const uint8_t *central_bdaddr, *client_bdaddr;
 
-	master_bdaddr = hciemu_get_master_bdaddr(data->hciemu);
-	if (!master_bdaddr) {
-		tester_warn("No master bdaddr");
+	central_bdaddr = hciemu_get_central_bdaddr(data->hciemu);
+	if (!central_bdaddr) {
+		tester_warn("No central bdaddr");
 		tester_test_failed();
 		return;
 	}
@@ -792,9 +786,9 @@ static void init_bdaddr(struct test_data *data)
 
 	if (data->out) {
 		memcpy(data->ia, client_bdaddr, sizeof(data->ia));
-		memcpy(data->ra, master_bdaddr, sizeof(data->ra));
+		memcpy(data->ra, central_bdaddr, sizeof(data->ra));
 	} else {
-		memcpy(data->ia, master_bdaddr, sizeof(data->ia));
+		memcpy(data->ia, central_bdaddr, sizeof(data->ia));
 		memcpy(data->ra, client_bdaddr, sizeof(data->ra));
 	}
 }
@@ -814,7 +808,7 @@ static void test_client(const void *test_data)
 
 	if (smp->expect_hci_command) {
 		tester_print("Registering HCI command callback");
-		hciemu_add_master_post_command_hook(data->hciemu,
+		hciemu_add_central_post_command_hook(data->hciemu,
 						command_hci_callback, data);
 		test_add_condition(data);
 	}
@@ -895,7 +889,7 @@ static void test_server(const void *test_data)
 
 	if (smp->expect_hci_command) {
 		tester_print("Registering HCI command callback");
-		hciemu_add_master_post_command_hook(data->hciemu,
+		hciemu_add_central_post_command_hook(data->hciemu,
 						command_hci_callback, data);
 		test_add_condition(data);
 	}

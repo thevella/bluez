@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  D-Bus helper library
  *
  *  Copyright (C) 2004-2011  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -563,6 +550,12 @@ static void emit_interfaces_added(struct generic_data *data)
 
 	if (root == NULL || data == root)
 		return;
+
+	/* Emit InterfacesAdded on the parent first so it appears first on the
+	 * bus as child objects may point to it.
+	 */
+	if (data->parent && data->parent->added)
+		emit_interfaces_added(data->parent);
 
 	signal = dbus_message_new_signal(root->path,
 					DBUS_INTERFACE_OBJECT_MANAGER,

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2016  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -41,7 +28,7 @@
 #define AD_IFACE "org.bluez.LEAdvertisement1"
 
 struct ad_data {
-	uint8_t data[25];
+	uint8_t data[245];
 	uint8_t len;
 };
 
@@ -65,6 +52,8 @@ static struct ad {
 	char *type;
 	char *local_name;
 	char *secondary;
+	uint32_t min_interval;
+	uint32_t max_interval;
 	uint16_t local_appearance;
 	uint16_t duration;
 	uint16_t timeout;
@@ -78,9 +67,11 @@ static struct ad {
 	bool tx_power;
 	bool name;
 	bool appearance;
+	bool rsi;
 } ad = {
 	.local_appearance = UINT16_MAX,
 	.discoverable = true,
+	.rsi = true,
 };
 
 static void ad_release(DBusConnection *conn)
@@ -136,8 +127,6 @@ static void print_uuid(const char *uuid)
 			str[sizeof(str) - 3] = '.';
 			if (str[sizeof(str) - 4] == ' ')
 				str[sizeof(str) - 4] = '.';
-
-			n = sizeof(str) - 1;
 		}
 
 		bt_shell_printf("UUID: %s(%s)\n", str, uuid);
@@ -188,13 +177,18 @@ static void print_ad(void)
 		bt_shell_printf("Appearance: %s\n",
 					ad.appearance ? "on" : "off");
 
-	bt_shell_printf("Discoverable: %s\n", ad.discoverable ? "on": "off");
+	bt_shell_printf("Discoverable: %s\n", ad.discoverable ? "on" : "off");
+	bt_shell_printf("RSI: %s\n", ad.rsi ? "on" : "off");
 
 	if (ad.duration)
 		bt_shell_printf("Duration: %u sec\n", ad.duration);
 
 	if (ad.timeout)
 		bt_shell_printf("Timeout: %u sec\n", ad.timeout);
+
+	if (ad.min_interval)
+		bt_shell_printf("Interval: %u-%u msec\n", ad.min_interval,
+					ad.max_interval);
 }
 
 static void register_reply(DBusMessage *message, void *user_data)
@@ -304,7 +298,7 @@ static gboolean get_manufacturer_data(const GDBusPropertyTable *property,
 
 static gboolean includes_exists(const GDBusPropertyTable *property, void *data)
 {
-	return ad.tx_power || ad.name || ad.appearance;
+	return ad.tx_power || ad.name || ad.appearance || ad.rsi;
 }
 
 static gboolean get_includes(const GDBusPropertyTable *property,
@@ -332,13 +326,20 @@ static gboolean get_includes(const GDBusPropertyTable *property,
 		dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING, &str);
 	}
 
+	if (ad.rsi) {
+		const char *str = "rsi";
+
+		dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING, &str);
+	}
+
 	dbus_message_iter_close_container(iter, &array);
 
 
 	return TRUE;
 }
 
-static gboolean local_name_exits(const GDBusPropertyTable *property, void *data)
+static gboolean local_name_exists(const GDBusPropertyTable *property,
+							void *data)
 {
 	return ad.local_name ? TRUE : FALSE;
 }
@@ -351,7 +352,8 @@ static gboolean get_local_name(const GDBusPropertyTable *property,
 	return TRUE;
 }
 
-static gboolean appearance_exits(const GDBusPropertyTable *property, void *data)
+static gboolean appearance_exists(const GDBusPropertyTable *property,
+							void *data)
 {
 	return ad.local_appearance != UINT16_MAX ? TRUE : FALSE;
 }
@@ -365,7 +367,7 @@ static gboolean get_appearance(const GDBusPropertyTable *property,
 	return TRUE;
 }
 
-static gboolean duration_exits(const GDBusPropertyTable *property, void *data)
+static gboolean duration_exists(const GDBusPropertyTable *property, void *data)
 {
 	return ad.duration;
 }
@@ -378,7 +380,7 @@ static gboolean get_duration(const GDBusPropertyTable *property,
 	return TRUE;
 }
 
-static gboolean timeout_exits(const GDBusPropertyTable *property, void *data)
+static gboolean timeout_exists(const GDBusPropertyTable *property, void *data)
 {
 	return ad.timeout;
 }
@@ -429,7 +431,7 @@ static gboolean get_discoverable(const GDBusPropertyTable *property,
 	return TRUE;
 }
 
-static gboolean discoverable_timeout_exits(const GDBusPropertyTable *property,
+static gboolean discoverable_timeout_exists(const GDBusPropertyTable *property,
 							void *data)
 {
 	return ad.discoverable_to;
@@ -444,7 +446,7 @@ static gboolean get_discoverable_timeout(const GDBusPropertyTable *property,
 	return TRUE;
 }
 
-static gboolean secondary_exits(const GDBusPropertyTable *property, void *data)
+static gboolean secondary_exists(const GDBusPropertyTable *property, void *data)
 {
 	return ad.secondary ? TRUE : FALSE;
 }
@@ -458,6 +460,36 @@ static gboolean get_secondary(const GDBusPropertyTable *property,
 	return TRUE;
 }
 
+static gboolean min_interval_exists(const GDBusPropertyTable *property,
+							void *data)
+{
+	return ad.min_interval;
+}
+
+static gboolean get_min_interval(const GDBusPropertyTable *property,
+				DBusMessageIter *iter, void *user_data)
+{
+	dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT32,
+						&ad.min_interval);
+
+	return TRUE;
+}
+
+static gboolean max_interval_exists(const GDBusPropertyTable *property,
+							void *data)
+{
+	return ad.max_interval;
+}
+
+static gboolean get_max_interval(const GDBusPropertyTable *property,
+				DBusMessageIter *iter, void *user_data)
+{
+	dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT32,
+						&ad.max_interval);
+
+	return TRUE;
+}
+
 static const GDBusPropertyTable ad_props[] = {
 	{ "Type", "s", get_type },
 	{ "ServiceUUIDs", "as", get_uuids, NULL, uuids_exists },
@@ -467,13 +499,15 @@ static const GDBusPropertyTable ad_props[] = {
 	{ "Data", "a{yv}", get_data, NULL, data_exists },
 	{ "Discoverable", "b", get_discoverable, NULL, discoverable_exists },
 	{ "DiscoverableTimeout", "q", get_discoverable_timeout, NULL,
-						discoverable_timeout_exits },
+						discoverable_timeout_exists },
 	{ "Includes", "as", get_includes, NULL, includes_exists },
-	{ "LocalName", "s", get_local_name, NULL, local_name_exits },
-	{ "Appearance", "q", get_appearance, NULL, appearance_exits },
-	{ "Duration", "q", get_duration, NULL, duration_exits },
-	{ "Timeout", "q", get_timeout, NULL, timeout_exits },
-	{ "SecondaryChannel", "s", get_secondary, NULL, secondary_exits },
+	{ "LocalName", "s", get_local_name, NULL, local_name_exists },
+	{ "Appearance", "q", get_appearance, NULL, appearance_exists },
+	{ "Duration", "q", get_duration, NULL, duration_exists },
+	{ "Timeout", "q", get_timeout, NULL, timeout_exists },
+	{ "MinInterval", "u", get_min_interval, NULL, min_interval_exists },
+	{ "MaxInterval", "u", get_max_interval, NULL, max_interval_exists },
+	{ "SecondaryChannel", "s", get_secondary, NULL, secondary_exists },
 	{ }
 };
 
@@ -486,6 +520,9 @@ void ad_register(DBusConnection *conn, GDBusProxy *manager, const char *type)
 
 	g_free(ad.type);
 	ad.type = g_strdup(type);
+
+	if (!strcasecmp(ad.type, "Broadcast"))
+		ad.discoverable = false;
 
 	if (g_dbus_register_interface(conn, AD_PATH, AD_IFACE, ad_methods,
 					NULL, ad_props, NULL, NULL) == FALSE) {
@@ -732,7 +769,7 @@ void ad_advertise_data(DBusConnection *conn, int argc, char *argv[])
 	struct ad_data data;
 
 	if (argc < 2 || !strlen(argv[1])) {
-		if (ad.manufacturer.data.len) {
+		if (ad.data.data.len) {
 			bt_shell_printf("Type: 0x%02x\n", ad.data.type);
 			bt_shell_hexdump(ad.data.data.data, ad.data.data.len);
 		}
@@ -860,6 +897,13 @@ void ad_advertise_local_name(DBusConnection *conn, const char *name)
 
 	g_dbus_emit_property_changed(conn, AD_PATH, AD_IFACE, "LocalName");
 
+	/* Remove local-name from Includes since LocalName would be set */
+	if (ad.name) {
+		ad.name = false;
+		g_dbus_emit_property_changed(conn, AD_PATH, AD_IFACE,
+							"Includes");
+	}
+
 	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
 }
 
@@ -961,6 +1005,47 @@ void ad_advertise_secondary(DBusConnection *conn, const char *value)
 
 	g_dbus_emit_property_changed(conn, AD_PATH, AD_IFACE,
 							"SecondaryChannel");
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+void ad_advertise_interval(DBusConnection *conn, uint32_t *min, uint32_t *max)
+{
+	if (!min && !max) {
+		if (ad.min_interval && ad.max_interval)
+			bt_shell_printf("Interval: %u-%u msec\n",
+					ad.min_interval, ad.max_interval);
+		return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+	}
+
+	if (min && ad.min_interval != *min) {
+		ad.min_interval = *min;
+		g_dbus_emit_property_changed(conn, AD_PATH, AD_IFACE,
+							"MinInterval");
+	}
+
+	if (max && ad.max_interval != *max) {
+		ad.max_interval = *max;
+		g_dbus_emit_property_changed(conn, AD_PATH, AD_IFACE,
+							"MaxInterval");
+	}
+
+	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+}
+
+void ad_advertise_rsi(DBusConnection *conn, dbus_bool_t *value)
+{
+	if (!value) {
+		bt_shell_printf("RSI: %s\n", ad.rsi ? "on" : "off");
+		return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+	}
+
+	if (ad.rsi == *value)
+		return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+
+	ad.rsi = *value;
+
+	g_dbus_emit_property_changed(conn, AD_PATH, AD_IFACE, "Includes");
 
 	return bt_shell_noninteractive_quit(EXIT_SUCCESS);
 }

@@ -1,24 +1,12 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2009-2010  Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2009-2010  Nokia Corporation
+ *  Copyright 2023 NXP
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -42,6 +30,27 @@
 #define DEFAULT_ACCEPT_TIMEOUT 2
 static int opt_update_sec = 0;
 
+#define DEFAULT_IO_QOS \
+{ \
+	.interval = 10000, \
+	.latency = 10, \
+	.sdu = 40, \
+	.phy = 0x02, \
+	.rtn = 2, \
+}
+
+struct bt_iso_qos qos = {
+	.ucast = {
+		.cig = BT_ISO_QOS_CIG_UNSET,
+		.cis = BT_ISO_QOS_CIG_UNSET,
+		.sca = 0x07,
+		.packing = 0x00,
+		.framing = 0x00,
+		.in = DEFAULT_IO_QOS,
+		.out = DEFAULT_IO_QOS,
+	},
+};
+
 struct io_data {
 	guint ref;
 	GIOChannel *io;
@@ -49,6 +58,7 @@ struct io_data {
 	int disconn;
 	int accept;
 	int voice;
+	struct bt_iso_qos *qos;
 };
 
 static void io_data_unref(struct io_data *data)
@@ -80,6 +90,7 @@ static struct io_data *io_data_new(GIOChannel *io, int reject, int disconn,
 	data->reject = reject;
 	data->disconn = disconn;
 	data->accept = accept;
+	data->qos = &qos;
 
 	return io_data_ref(data);
 }
@@ -323,7 +334,7 @@ static void l2cap_connect(const char *src, const char *dst, uint8_t addr_type,
 static void l2cap_listen(const char *src, uint8_t addr_type, uint16_t psm,
 				uint16_t cid, int defer, int reject,
 				int disconn, int accept, int sec,
-				gboolean master)
+				gboolean central)
 {
 	struct io_data *data;
 	BtIOConnect conn;
@@ -356,7 +367,7 @@ static void l2cap_listen(const char *src, uint8_t addr_type, uint16_t psm,
 					BT_IO_OPT_PSM, psm,
 					BT_IO_OPT_CID, cid,
 					BT_IO_OPT_SEC_LEVEL, sec,
-					BT_IO_OPT_MASTER, master,
+					BT_IO_OPT_CENTRAL, central,
 					BT_IO_OPT_INVALID);
 	else
 		l2_srv = bt_io_listen(conn, cfm, data,
@@ -366,7 +377,7 @@ static void l2cap_listen(const char *src, uint8_t addr_type, uint16_t psm,
 					BT_IO_OPT_PSM, psm,
 					BT_IO_OPT_CID, cid,
 					BT_IO_OPT_SEC_LEVEL, sec,
-					BT_IO_OPT_MASTER, master,
+					BT_IO_OPT_CENTRAL, central,
 					BT_IO_OPT_INVALID);
 
 	if (!l2_srv) {
@@ -415,7 +426,7 @@ static void rfcomm_connect(const char *src, const char *dst, uint8_t ch,
 
 static void rfcomm_listen(const char *src, uint8_t ch, gboolean defer,
 				int reject, int disconn, int accept,
-				int sec, gboolean master)
+				int sec, gboolean central)
 {
 	struct io_data *data;
 	BtIOConnect conn;
@@ -440,7 +451,7 @@ static void rfcomm_listen(const char *src, uint8_t ch, gboolean defer,
 					BT_IO_OPT_SOURCE, src,
 					BT_IO_OPT_CHANNEL, ch,
 					BT_IO_OPT_SEC_LEVEL, sec,
-					BT_IO_OPT_MASTER, master,
+					BT_IO_OPT_CENTRAL, central,
 					BT_IO_OPT_INVALID);
 	else
 		rc_srv = bt_io_listen(conn, cfm,
@@ -448,7 +459,7 @@ static void rfcomm_listen(const char *src, uint8_t ch, gboolean defer,
 					&err,
 					BT_IO_OPT_CHANNEL, ch,
 					BT_IO_OPT_SEC_LEVEL, sec,
-					BT_IO_OPT_MASTER, master,
+					BT_IO_OPT_CENTRAL, central,
 					BT_IO_OPT_INVALID);
 
 	if (!rc_srv) {
@@ -543,9 +554,88 @@ static void sco_listen(const char *src, gboolean defer, int reject,
 	g_io_channel_unref(sco_srv);
 }
 
+static void iso_connect(const char *src, const char *dst, int disconn)
+{
+	struct io_data *data;
+	GError *err = NULL;
+
+	printf("Connecting ISO to %s\n", dst);
+
+	data = io_data_new(NULL, -1, disconn, -1);
+
+	if (src)
+		data->io = bt_io_connect(connect_cb, data,
+						(GDestroyNotify) io_data_unref,
+						&err,
+						BT_IO_OPT_SOURCE, src,
+						BT_IO_OPT_DEST, dst,
+						BT_IO_OPT_MODE, BT_IO_MODE_ISO,
+						BT_IO_OPT_QOS, data->qos,
+						BT_IO_OPT_INVALID);
+	else
+		data->io = bt_io_connect(connect_cb, data,
+						(GDestroyNotify) io_data_unref,
+						&err,
+						BT_IO_OPT_DEST, dst,
+						BT_IO_OPT_MODE, BT_IO_MODE_ISO,
+						BT_IO_OPT_QOS, data->qos,
+						BT_IO_OPT_INVALID);
+
+	if (!data->io) {
+		printf("Connecting to %s failed: %s\n", dst, err->message);
+		g_error_free(err);
+		exit(EXIT_FAILURE);
+	}
+}
+
+static void iso_listen(const char *src, gboolean defer, int reject,
+				int disconn, int accept)
+{
+	struct io_data *data;
+	BtIOConnect conn;
+	BtIOConfirm cfm;
+	GIOChannel *iso_srv;
+	GError *err = NULL;
+
+	printf("Listening for ISO connections\n");
+
+	if (defer) {
+		conn = NULL;
+		cfm = confirm_cb;
+	} else {
+		conn = connect_cb;
+		cfm = NULL;
+	}
+
+	data = io_data_new(NULL, reject, disconn, accept);
+
+	if (src)
+		iso_srv = bt_io_listen(conn, cfm, data,
+					(GDestroyNotify) io_data_unref,
+					&err,
+					BT_IO_OPT_SOURCE, src,
+					BT_IO_OPT_MODE, BT_IO_MODE_ISO,
+					BT_IO_OPT_INVALID);
+	else
+		iso_srv = bt_io_listen(conn, cfm, data,
+					(GDestroyNotify) io_data_unref,
+					&err,
+					BT_IO_OPT_MODE, BT_IO_MODE_ISO,
+					BT_IO_OPT_INVALID);
+
+	if (!iso_srv) {
+		printf("Listening failed: %s\n", err->message);
+		g_error_free(err);
+		exit(EXIT_FAILURE);
+	}
+
+	g_io_channel_unref(iso_srv);
+}
+
 static int opt_channel = -1;
 static int opt_psm = 0;
 static gboolean opt_sco = FALSE;
+static gboolean opt_iso = FALSE;
 static gboolean opt_defer = FALSE;
 static gint opt_voice = 0;
 static char *opt_dev = NULL;
@@ -553,7 +643,7 @@ static int opt_reject = -1;
 static int opt_disconn = -1;
 static int opt_accept = DEFAULT_ACCEPT_TIMEOUT;
 static int opt_sec = 0;
-static gboolean opt_master = FALSE;
+static gboolean opt_central = FALSE;
 static int opt_priority = 0;
 static int opt_cid = 0;
 static guint8 opt_addr_type = 0;
@@ -572,6 +662,8 @@ static GOptionEntry options[] = {
 				"(0 BR/EDR 1 LE Public 2 LE Random" },
 	{ "sco", 's', 0, G_OPTION_ARG_NONE, &opt_sco,
 				"Use SCO" },
+	{ "iso", 'o', 0, G_OPTION_ARG_NONE, &opt_iso,
+				"Use ISO" },
 	{ "defer", 'd', 0, G_OPTION_ARG_NONE, &opt_defer,
 				"Use DEFER_SETUP for incoming connections" },
 	{ "voice", 'V', 0, G_OPTION_ARG_INT, &opt_voice,
@@ -589,8 +681,10 @@ static GOptionEntry options[] = {
 				"Disconnect connection after N seconds" },
 	{ "accept", 'a', 0, G_OPTION_ARG_INT, &opt_accept,
 				"Accept connection after N seconds" },
-	{ "master", 'm', 0, G_OPTION_ARG_NONE, &opt_master,
-				"Master role switch (incoming connections)" },
+	{ "central", 'C', 0, G_OPTION_ARG_NONE, &opt_central,
+				"Central role switch (incoming connections)" },
+	{ "master", 'm', 0, G_OPTION_ARG_NONE, &opt_central,
+				"Deprecated. Use central instead." },
 	{ "priority", 'P', 0, G_OPTION_ARG_INT, &opt_priority,
 				"Transmission priority: Setting a priority "
 				"outside the range 0 to 6 requires the"
@@ -627,7 +721,7 @@ int main(int argc, char *argv[])
 		else
 			l2cap_listen(opt_dev, opt_addr_type, opt_psm, opt_cid,
 					opt_defer, opt_reject, opt_disconn,
-					opt_accept, opt_sec, opt_master);
+					opt_accept, opt_sec, opt_central);
 	}
 
 	if (opt_channel != -1) {
@@ -637,7 +731,7 @@ int main(int argc, char *argv[])
 		else
 			rfcomm_listen(opt_dev, opt_channel, opt_defer,
 					opt_reject, opt_disconn, opt_accept,
-					opt_sec, opt_master);
+					opt_sec, opt_central);
 	}
 
 	if (opt_sco) {
@@ -646,6 +740,14 @@ int main(int argc, char *argv[])
 		else
 			sco_listen(opt_dev, opt_defer, opt_reject,
 					opt_disconn, opt_accept, opt_voice);
+	}
+
+	if (opt_iso) {
+		if (argc > 1)
+			iso_connect(opt_dev, argv[1], opt_disconn);
+		else
+			iso_listen(opt_dev, opt_defer, opt_reject,
+					opt_disconn, opt_accept);
 	}
 
 	signal(SIGTERM, sig_term);

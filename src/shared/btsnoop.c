@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012-2014  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -164,7 +151,7 @@ struct btsnoop *btsnoop_create(const char *path, size_t max_size,
 	}
 
 	btsnoop->fd = open(real_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
-					S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+									0644);
 	if (btsnoop->fd < 0) {
 		free(btsnoop);
 		return NULL;
@@ -243,7 +230,7 @@ static bool btsnoop_rotate(struct btsnoop *btsnoop)
 	btsnoop->cur_count++;
 
 	btsnoop->fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
-					S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+									0644);
 	if (btsnoop->fd < 0)
 		return false;
 
@@ -349,7 +336,7 @@ bool btsnoop_write_hci(struct btsnoop *btsnoop, struct timeval *tv,
 		break;
 
 	case BTSNOOP_FORMAT_MONITOR:
-		flags = (index << 16) | opcode;
+		flags = ((uint32_t)index << 16) | opcode;
 		break;
 
 	default:
@@ -526,7 +513,7 @@ bool btsnoop_read_hci(struct btsnoop *btsnoop, struct timeval *tv,
 		return false;
 	}
 
-	toread = be32toh(pkt.size);
+	toread = be32toh(pkt.len);
 	if (toread > BTSNOOP_MAX_PACKET_SIZE) {
 		btsnoop->aborted = true;
 		return false;

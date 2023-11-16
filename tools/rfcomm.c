@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -50,7 +37,7 @@ static int rfcomm_raw_tty = 0;
 static int auth = 0;
 static int encryption = 0;
 static int secure = 0;
-static int master = 0;
+static int central = 0;
 static int linger = 0;
 
 static char *rfcomm_state[] = {
@@ -311,6 +298,7 @@ static void cmd_connect(int ctl, int dev, bdaddr_t *bdaddr, int argc, char **arg
 
 		if (setsockopt(sk, SOL_SOCKET, SO_LINGER, &l, sizeof(l)) < 0) {
 			perror("Can't set linger option");
+			close(sk);
 			return;
 		}
 	}
@@ -447,7 +435,7 @@ static void cmd_listen(int ctl, int dev, bdaddr_t *bdaddr, int argc, char **argv
 	}
 
 	lm = 0;
-	if (master)
+	if (central)
 		lm |= RFCOMM_LM_MASTER;
 	if (auth)
 		lm |= RFCOMM_LM_AUTH;
@@ -479,6 +467,7 @@ static void cmd_listen(int ctl, int dev, bdaddr_t *bdaddr, int argc, char **argv
 	if (getsockname(nsk, (struct sockaddr *)&laddr, &alen) < 0) {
 		perror("Can't get RFCOMM socket name");
 		close(nsk);
+		close(sk);
 		return;
 	}
 
@@ -488,6 +477,7 @@ static void cmd_listen(int ctl, int dev, bdaddr_t *bdaddr, int argc, char **argv
 		if (setsockopt(nsk, SOL_SOCKET, SO_LINGER, &l, sizeof(l)) < 0) {
 			perror("Can't set linger option");
 			close(nsk);
+			close(sk);
 			return;
 		}
 	}
@@ -503,6 +493,7 @@ static void cmd_listen(int ctl, int dev, bdaddr_t *bdaddr, int argc, char **argv
 	dev = ioctl(nsk, RFCOMMCREATEDEV, &req);
 	if (dev < 0) {
 		perror("Can't create RFCOMM TTY");
+		close(nsk);
 		close(sk);
 		return;
 	}
@@ -659,7 +650,7 @@ static void usage(void)
 		"\t-A, --auth                     Enable authentication\n"
 		"\t-E, --encrypt                  Enable encryption\n"
 		"\t-S, --secure                   Secure connection\n"
-		"\t-M, --master                   Become the master of a piconet\n"
+		"\t-C, --central                  Become the central of a piconet\n"
 		"\t-L, --linger [seconds]         Set linger timeout\n"
 		"\t-a                             Show all devices (default)\n"
 		"\n");
@@ -681,7 +672,8 @@ static struct option main_options[] = {
 	{ "auth",	0, 0, 'A' },
 	{ "encrypt",	0, 0, 'E' },
 	{ "secure",	0, 0, 'S' },
-	{ "master",	0, 0, 'M' },
+	{ "master",	0, 0, 'M' }, /* Deprecated. Kept for compatibility. */
+	{ "central",	0, 0, 'C' },
 	{ "linger",	1, 0, 'L' },
 	{ 0, 0, 0, 0 }
 };
@@ -693,7 +685,8 @@ int main(int argc, char *argv[])
 
 	bacpy(&bdaddr, BDADDR_ANY);
 
-	while ((opt = getopt_long(argc, argv, "+i:rahAESML:", main_options, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "+i:rahAESMCL:", main_options,
+								NULL)) != -1) {
 		switch(opt) {
 		case 'i':
 			if (strncmp(optarg, "hci", 3) == 0)
@@ -726,8 +719,9 @@ int main(int argc, char *argv[])
 			secure = 1;
 			break;
 
-		case 'M':
-			master = 1;
+		case 'M': /* Deprecated. Kept for compatibility. */
+		case 'C':
+			central = 1;
 			break;
 
 		case 'L':

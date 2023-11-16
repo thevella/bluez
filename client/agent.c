@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -271,7 +258,7 @@ static DBusMessage *cancel_request(DBusConnection *conn,
 	return dbus_message_new_method_return(msg);
 }
 
-static const GDBusMethodTable methods[] = {
+static const GDBusMethodTable agent_methods[] = {
 	{ GDBUS_METHOD("Release", NULL, NULL, release_agent) },
 	{ GDBUS_ASYNC_METHOD("RequestPinCode",
 			GDBUS_ARGS({ "device", "o" }),
@@ -295,6 +282,78 @@ static const GDBusMethodTable methods[] = {
 	{ GDBUS_ASYNC_METHOD("AuthorizeService",
 			GDBUS_ARGS({ "device", "o" }, { "uuid", "s" }),
 			NULL,  authorize_service) },
+	{ GDBUS_METHOD("Cancel", NULL, NULL, cancel_request) },
+	{ }
+};
+
+static DBusMessage *auto_confirmation(DBusConnection *conn,
+					DBusMessage *msg, void *user_data)
+{
+	const char *device;
+	dbus_uint32_t passkey;
+
+	bt_shell_printf("Request confirmation\n");
+
+	dbus_message_get_args(msg, NULL, DBUS_TYPE_OBJECT_PATH, &device,
+				DBUS_TYPE_UINT32, &passkey, DBUS_TYPE_INVALID);
+
+	bt_shell_printf("Confirm passkey %06u (auto)", passkey);
+
+	return dbus_message_new_method_return(msg);
+}
+
+static DBusMessage *auto_authorization(DBusConnection *conn,
+					DBusMessage *msg, void *user_data)
+{
+	const char *device;
+
+	bt_shell_printf("Request authorization\n");
+
+	dbus_message_get_args(msg, NULL, DBUS_TYPE_OBJECT_PATH, &device,
+							DBUS_TYPE_INVALID);
+
+	bt_shell_printf("Accept pairing (auto)");
+
+	return dbus_message_new_method_return(msg);
+}
+
+static DBusMessage *auto_authorize_service(DBusConnection *conn,
+					DBusMessage *msg, void *user_data)
+{
+	const char *device, *uuid;
+
+	dbus_message_get_args(msg, NULL, DBUS_TYPE_OBJECT_PATH, &device,
+				DBUS_TYPE_STRING, &uuid, DBUS_TYPE_INVALID);
+
+	bt_shell_printf("Authorize service %s (auto)", uuid);
+
+	return dbus_message_new_method_return(msg);
+}
+
+static const GDBusMethodTable auto_methods[] = {
+	{ GDBUS_METHOD("Release", NULL, NULL, release_agent) },
+	{ GDBUS_ASYNC_METHOD("RequestPinCode",
+			GDBUS_ARGS({ "device", "o" }),
+			GDBUS_ARGS({ "pincode", "s" }), request_pincode) },
+	{ GDBUS_METHOD("DisplayPinCode",
+			GDBUS_ARGS({ "device", "o" }, { "pincode", "s" }),
+			NULL, display_pincode) },
+	{ GDBUS_ASYNC_METHOD("RequestPasskey",
+			GDBUS_ARGS({ "device", "o" }),
+			GDBUS_ARGS({ "passkey", "u" }), request_passkey) },
+	{ GDBUS_METHOD("DisplayPasskey",
+			GDBUS_ARGS({ "device", "o" }, { "passkey", "u" },
+							{ "entered", "q" }),
+			NULL, display_passkey) },
+	{ GDBUS_ASYNC_METHOD("RequestConfirmation",
+			GDBUS_ARGS({ "device", "o" }, { "passkey", "u" }),
+			NULL, auto_confirmation) },
+	{ GDBUS_ASYNC_METHOD("RequestAuthorization",
+			GDBUS_ARGS({ "device", "o" }),
+			NULL, auto_authorization) },
+	{ GDBUS_ASYNC_METHOD("AuthorizeService",
+			GDBUS_ARGS({ "device", "o" }, { "uuid", "s" }),
+			NULL,  auto_authorize_service) },
 	{ GDBUS_METHOD("Cancel", NULL, NULL, cancel_request) },
 	{ }
 };
@@ -332,12 +391,22 @@ void agent_register(DBusConnection *conn, GDBusProxy *manager,
 						const char *capability)
 
 {
+	const GDBusMethodTable *methods = agent_methods;
+
 	if (agent_registered == TRUE) {
 		bt_shell_printf("Agent is already registered\n");
 		return;
 	}
 
 	agent_capability = capability;
+
+	if (!strcasecmp(agent_capability, "auto")) {
+		bt_shell_printf("Warning: setting auto response is not secure, "
+				"it bypass user confirmation/authorization, it "
+				"shall only be used for test automation.\n");
+		agent_capability = "";
+		methods = auto_methods;
+	}
 
 	if (g_dbus_register_interface(conn, AGENT_PATH,
 					AGENT_INTERFACE, methods,

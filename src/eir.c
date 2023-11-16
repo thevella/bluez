@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011  Nokia Corporation
  *  Copyright (C) 2011  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -66,9 +53,9 @@ void eir_data_free(struct eir_data *eir)
 	eir->services = NULL;
 	g_free(eir->name);
 	eir->name = NULL;
-	g_free(eir->hash);
+	free(eir->hash);
 	eir->hash = NULL;
-	g_free(eir->randomizer);
+	free(eir->randomizer);
 	eir->randomizer = NULL;
 	g_slist_free_full(eir->msd_list, g_free);
 	eir->msd_list = NULL;
@@ -249,6 +236,9 @@ static void eir_parse_data(struct eir_data *eir, uint8_t type,
 	memcpy(ad->data, data, len);
 
 	eir->data_list = g_slist_append(eir->data_list, ad);
+
+	if (type == EIR_CSIP_RSI)
+		eir->rsi = true;
 }
 
 void eir_parse(struct eir_data *eir, const uint8_t *eir_data, uint8_t eir_len)
@@ -336,13 +326,13 @@ void eir_parse(struct eir_data *eir, const uint8_t *eir_data, uint8_t eir_len)
 		case EIR_SSP_HASH:
 			if (data_len < 16)
 				break;
-			eir->hash = g_memdup(data, 16);
+			eir->hash = util_memdup(data, 16);
 			break;
 
 		case EIR_SSP_RANDOMIZER:
 			if (data_len < 16)
 				break;
-			eir->randomizer = g_memdup(data, 16);
+			eir->randomizer = util_memdup(data, 16);
 			break;
 
 		case EIR_DEVICE_ID:
@@ -611,4 +601,26 @@ int eir_create_oob(const bdaddr_t *addr, const char *name, uint32_t cod,
 	put_le16(eir_total_len, data);
 
 	return eir_total_len;
+}
+
+static int match_sd_uuid(const void *data, const void *user_data)
+{
+	const struct eir_sd *sd = data;
+	const char *uuid = user_data;
+
+	return strcmp(sd->uuid, uuid);
+}
+
+struct eir_sd *eir_get_service_data(struct eir_data *eir, const char *uuid)
+{
+	GSList *l;
+
+	if (!eir || !uuid)
+		return NULL;
+
+	l = g_slist_find_custom(eir->sd_list, uuid, match_sd_uuid);
+	if (!l)
+		return NULL;
+
+	return l->data;
 }

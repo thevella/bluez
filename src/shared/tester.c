@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012-2014  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -47,8 +34,10 @@
 
 #include "src/shared/mainloop.h"
 #include "src/shared/util.h"
+#include "src/shared/io.h"
 #include "src/shared/tester.h"
 #include "src/shared/log.h"
+#include "src/shared/timeout.h"
 
 #define COLOR_OFF	"\x1B[0m"
 #define COLOR_BLACK	"\x1B[0;30m"
@@ -93,11 +82,14 @@ struct test_case {
 	enum test_result result;
 	enum test_stage stage;
 	const void *test_data;
+	const struct iovec *iov;
+	size_t iovcnt;
 	tester_data_func_t pre_setup_func;
 	tester_data_func_t setup_func;
 	tester_data_func_t test_func;
 	tester_data_func_t teardown_func;
 	tester_data_func_t post_teardown_func;
+	tester_data_func_t io_complete_func;
 	gdouble start_time;
 	gdouble end_time;
 	unsigned int timeout;
@@ -119,6 +111,7 @@ static gboolean option_debug = FALSE;
 static gboolean option_monitor = FALSE;
 static gboolean option_list = FALSE;
 static const char *option_prefix = NULL;
+static const char *option_string = NULL;
 
 struct monitor_hdr {
 	uint16_t opcode;
@@ -138,7 +131,7 @@ static void test_destroy(gpointer data)
 	struct test_case *test = data;
 
 	if (test->timeout_id > 0)
-		g_source_remove(test->timeout_id);
+		timeout_remove(test->timeout_id);
 
 	if (test->teardown_id > 0)
 		g_source_remove(test->teardown_id);
@@ -298,6 +291,12 @@ void tester_add_full(const char *name, const void *test_data,
 		return;
 	}
 
+	if (option_string && !strstr(name, option_string)) {
+		if (destroy)
+			destroy(user_data);
+		return;
+	}
+
 	if (option_list) {
 		tester_log("%s", name);
 		if (destroy)
@@ -351,14 +350,20 @@ void tester_add(const char *name, const void *test_data,
 					teardown_func, NULL, 0, NULL, NULL);
 }
 
-void *tester_get_data(void)
+static struct test_case *tester_get_test(void)
 {
-	struct test_case *test;
-
 	if (!test_current)
 		return NULL;
 
-	test = test_current->data;
+	return test_current->data;
+}
+
+void *tester_get_data(void)
+{
+	struct test_case *test = tester_get_test();
+
+	if (!test)
+		return NULL;
 
 	return test->user_data;
 }
@@ -435,7 +440,7 @@ static gboolean teardown_callback(gpointer user_data)
 	return FALSE;
 }
 
-static gboolean test_timeout(gpointer user_data)
+static bool test_timeout(gpointer user_data)
 {
 	struct test_case *test = user_data;
 
@@ -476,8 +481,9 @@ static void next_test_case(void)
 	test->start_time = g_timer_elapsed(test_timer, NULL);
 
 	if (test->timeout > 0)
-		test->timeout_id = g_timeout_add_seconds(test->timeout,
-							test_timeout, test);
+		test->timeout_id = timeout_add_seconds(test->timeout,
+							test_timeout, test,
+							NULL);
 
 	test->stage = TEST_STAGE_PRE_SETUP;
 
@@ -547,6 +553,11 @@ void tester_pre_setup_failed(void)
 	if (test->stage != TEST_STAGE_PRE_SETUP)
 		return;
 
+	if (test->timeout_id > 0) {
+		timeout_remove(test->timeout_id);
+		test->timeout_id = 0;
+	}
+
 	print_progress(test->name, COLOR_RED, "pre setup failed");
 
 	g_idle_add(done_callback, test);
@@ -584,7 +595,7 @@ void tester_setup_failed(void)
 	test->stage = TEST_STAGE_POST_TEARDOWN;
 
 	if (test->timeout_id > 0) {
-		g_source_remove(test->timeout_id);
+		timeout_remove(test->timeout_id);
 		test->timeout_id = 0;
 	}
 
@@ -607,9 +618,12 @@ static void test_result(enum test_result result)
 		return;
 
 	if (test->timeout_id > 0) {
-		g_source_remove(test->timeout_id);
+		timeout_remove(test->timeout_id);
 		test->timeout_id = 0;
 	}
+
+	if (test->result == TEST_RESULT_FAILED)
+		result = TEST_RESULT_FAILED;
 
 	test->result = result;
 	switch (result) {
@@ -817,6 +831,8 @@ static GOptionEntry options[] = {
 				"Only list the tests to be run" },
 	{ "prefix", 'p', 0, G_OPTION_ARG_STRING, &option_prefix,
 				"Run tests matching provided prefix" },
+	{ "string", 's', 0, G_OPTION_ARG_STRING, &option_string,
+				"Run tests matching provided string" },
 	{ NULL },
 };
 
@@ -856,6 +872,161 @@ void tester_init(int *argc, char ***argv)
 	test_current = NULL;
 }
 
+static struct io *ios[2];
+
+static bool io_disconnected(struct io *io, void *user_data)
+{
+	if (io == ios[0]) {
+		io_destroy(ios[0]);
+		ios[0] = NULL;
+	} else if (io == ios[1]) {
+		io_destroy(ios[1]);
+		ios[1] = NULL;
+	}
+
+	return false;
+}
+
+static const struct iovec *test_get_iov(struct test_case *test)
+{
+	const struct iovec *iov;
+
+	if (!test || !test->iov || !test->iovcnt)
+		return NULL;
+
+	iov = test->iov;
+
+	test->iov++;
+	test->iovcnt--;
+
+	return iov;
+}
+
+static bool test_io_send(struct io *io, void *user_data)
+{
+	struct test_case *test = tester_get_test();
+	const struct iovec *iov = test_get_iov(test);
+	ssize_t len;
+
+	if (!iov)
+		return false;
+
+	len = io_send(io, iov, 1);
+
+	tester_monitor('<', 0x0004, 0x0000, iov->iov_base, len);
+
+	g_assert_cmpint(len, ==, iov->iov_len);
+
+	if (!test->iovcnt && test->io_complete_func) {
+		test->io_complete_func(test->test_data);
+	} else if (test->iovcnt && !test->iov->iov_base) {
+		test_get_iov(test);
+		return test_io_send(io, user_data);
+	}
+
+	return false;
+}
+
+static bool test_io_recv(struct io *io, void *user_data)
+{
+	struct test_case *test = tester_get_test();
+	const struct iovec *iov = test_get_iov(test);
+	unsigned char buf[512];
+	int fd;
+	ssize_t len;
+
+	fd = io_get_fd(io);
+
+	len = read(fd, buf, sizeof(buf));
+
+	g_assert(len > 0);
+
+	tester_monitor('>', 0x0004, 0x0000, buf, len);
+
+	if (!iov)
+		return true;
+
+	g_assert_cmpint(len, ==, iov->iov_len);
+
+	if (memcmp(buf, iov->iov_base, len))
+		tester_monitor('!', 0x0004, 0x0000, iov->iov_base, len);
+
+	g_assert(memcmp(buf, iov->iov_base, len) == 0);
+
+	if (test->iovcnt)
+		io_set_write_handler(io, test_io_send, NULL, NULL);
+	else if (test->io_complete_func)
+		test->io_complete_func(test->test_data);
+
+	return true;
+}
+
+static void setup_io(void)
+{
+	int fd[2], err;
+
+	io_destroy(ios[0]);
+	io_destroy(ios[1]);
+
+	err = socketpair(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0, fd);
+	if (err < 0) {
+		tester_warn("socketpair: %s (%d)", strerror(errno), errno);
+		return;
+	}
+
+	ios[0] = io_new(fd[0]);
+	if (!ios[0]) {
+		tester_warn("io_new: %p", ios[0]);
+		return;
+	}
+
+	io_set_close_on_destroy(ios[0], true);
+	io_set_disconnect_handler(ios[0], io_disconnected, NULL, NULL);
+
+	ios[1] = io_new(fd[1]);
+	if (!ios[1]) {
+		tester_warn("io_new: %p", ios[1]);
+		return;
+	}
+
+	io_set_close_on_destroy(ios[1], true);
+	io_set_disconnect_handler(ios[1], io_disconnected, NULL, NULL);
+	io_set_read_handler(ios[1], test_io_recv, NULL, NULL);
+}
+
+struct io *tester_setup_io(const struct iovec *iov, int iovcnt)
+{
+	struct test_case *test = tester_get_test();
+
+	if (!ios[0] || !ios[1]) {
+		setup_io();
+		if (!ios[0] || !ios[1]) {
+			tester_warn("Unable to setup IO");
+			return NULL;
+		}
+	}
+
+	test->iov = iov;
+	test->iovcnt = iovcnt;
+
+	return ios[0];
+}
+
+void tester_io_send(void)
+{
+	struct test_case *test = tester_get_test();
+
+	if (test->iovcnt)
+		io_set_write_handler(ios[1], test_io_send, NULL, NULL);
+}
+
+void tester_io_set_complete_func(tester_data_func_t func)
+{
+	struct test_case *test = tester_get_test();
+
+	test->io_complete_func = func;
+}
+
 int tester_run(void)
 {
 	int ret;
@@ -875,6 +1046,9 @@ int tester_run(void)
 
 	if (option_monitor)
 		bt_log_close();
+
+	io_destroy(ios[0]);
+	io_destroy(ios[1]);
 
 	return ret == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011-2014  Intel Corporation
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -35,6 +22,39 @@
 #define PACKET_FILTER_SHOW_SCO_DATA	(1 << 5)
 #define PACKET_FILTER_SHOW_A2DP_STREAM	(1 << 6)
 #define PACKET_FILTER_SHOW_MGMT_SOCKET	(1 << 7)
+#define PACKET_FILTER_SHOW_ISO_DATA	(1 << 8)
+#define TV_MSEC(_tv) (long long)((_tv).tv_sec * 1000 + (_tv).tv_usec / 1000)
+
+struct packet_latency {
+	struct timeval total;
+	struct timeval min;
+	struct timeval max;
+	struct timeval med;
+};
+
+struct packet_frame {
+	struct timeval tv;
+	size_t num;
+	size_t len;
+};
+
+struct packet_conn_data {
+	uint16_t index;
+	uint8_t  src[6];
+	uint16_t handle;
+	uint16_t link;
+	uint8_t  type;
+	uint8_t  dst[6];
+	uint8_t  dst_type;
+	struct queue *tx_q;
+	struct queue *chan_q;
+	struct packet_latency tx_l;
+	void     *data;
+	void     (*destroy)(void *data);
+};
+
+struct packet_conn_data *packet_get_conn_data(uint16_t handle);
+void packet_latency_add(struct packet_latency *latency, struct timeval *delta);
 
 bool packet_has_filter(unsigned long filter);
 void packet_set_filter(unsigned long filter);
@@ -44,22 +64,25 @@ void packet_del_filter(unsigned long filter);
 void packet_set_priority(const char *priority);
 void packet_select_index(uint16_t index);
 void packet_set_fallback_manufacturer(uint16_t manufacturer);
+void packet_set_msft_evt_prefix(const uint8_t *prefix, uint8_t len);
 
 void packet_hexdump(const unsigned char *buf, uint16_t len);
 void packet_print_error(const char *label, uint8_t error);
 void packet_print_version(const char *label, uint8_t version,
 				const char *sublabel, uint16_t subversion);
 void packet_print_company(const char *label, uint16_t company);
-void packet_print_addr(const char *label, const void *data, bool random);
+void packet_print_addr(const char *label, const void *data, uint8_t type);
 void packet_print_handle(uint16_t handle);
-void packet_print_rssi(int8_t rssi);
+void packet_print_rssi(const char *label, int8_t rssi);
 void packet_print_ad(const void *data, uint8_t size);
 void packet_print_features_lmp(const uint8_t *features, uint8_t page);
 void packet_print_features_ll(const uint8_t *features);
+void packet_print_features_msft(const uint8_t *features);
 void packet_print_channel_map_lmp(const uint8_t *map);
 void packet_print_channel_map_ll(const uint8_t *map);
 void packet_print_io_capability(uint8_t capability);
 void packet_print_io_authentication(uint8_t authentication);
+void packet_print_codec_id(const char *label, uint8_t codec);
 
 void packet_control(struct timeval *tv, struct ucred *cred,
 					uint16_t index, uint16_t opcode,

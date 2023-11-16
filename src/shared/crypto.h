@@ -1,23 +1,10 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012-2014  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -66,3 +53,10 @@ bool bt_crypto_verify_att_sign(struct bt_crypto *crypto, const uint8_t key[16],
 				const uint8_t *pdu, uint16_t pdu_len);
 bool bt_crypto_gatt_hash(struct bt_crypto *crypto, struct iovec *iov,
 				size_t iov_len, uint8_t res[16]);
+bool bt_crypto_sef(struct bt_crypto *crypto, const uint8_t k[16],
+			const uint8_t sirk[16], uint8_t out[16]);
+bool bt_crypto_sih(struct bt_crypto *crypto, const uint8_t k[16],
+					const uint8_t r[3], uint8_t hash[3]);
+bool bt_crypto_sirk(struct bt_crypto *crypto, const char *str, uint16_t vendor,
+			uint16_t product, uint16_t version, uint16_t source,
+			uint8_t sirk[16]);

@@ -1,23 +1,10 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -60,6 +47,10 @@ typedef void (*gatt_db_write_t) (struct gatt_db_attribute *attrib,
 					const uint8_t *value, size_t len,
 					uint8_t opcode, struct bt_att *att,
 					void *user_data);
+typedef void (*gatt_db_notify_t) (struct gatt_db_attribute *attrib,
+					struct gatt_db_attribute *ccc,
+					const uint8_t *value, size_t len,
+					struct bt_att *att, void *user_data);
 
 struct gatt_db_attribute *
 gatt_db_service_add_characteristic(struct gatt_db_attribute *attrib,
@@ -105,6 +96,7 @@ gatt_db_service_add_descriptor(struct gatt_db_attribute *attrib,
 					gatt_db_read_t read_func,
 					gatt_db_write_t write_func,
 					void *user_data);
+
 struct gatt_db_attribute *
 gatt_db_service_insert_descriptor(struct gatt_db_attribute *attrib,
 					uint16_t handle,
@@ -113,6 +105,9 @@ gatt_db_service_insert_descriptor(struct gatt_db_attribute *attrib,
 					gatt_db_read_t read_func,
 					gatt_db_write_t write_func,
 					void *user_data);
+
+struct gatt_db_attribute *
+gatt_db_service_add_ccc(struct gatt_db_attribute *attrib, uint32_t permissions);
 
 struct gatt_db_attribute *
 gatt_db_insert_included(struct gatt_db *db, uint16_t handle,
@@ -205,6 +200,11 @@ unsigned int gatt_db_register(struct gatt_db *db,
 					gatt_db_destroy_func_t destroy);
 bool gatt_db_unregister(struct gatt_db *db, unsigned int id);
 
+void gatt_db_ccc_register(struct gatt_db *db, gatt_db_read_t read_func,
+					gatt_db_write_t write_func,
+					gatt_db_notify_t notify_func,
+					void *user_data);
+
 typedef uint8_t (*gatt_db_authorize_cb_t)(struct gatt_db_attribute *attrib,
 					uint8_t opcode, struct bt_att *att,
 					void *user_data);
@@ -224,6 +224,9 @@ const bt_uuid_t *gatt_db_attribute_get_type(
 					const struct gatt_db_attribute *attrib);
 
 uint16_t gatt_db_attribute_get_handle(const struct gatt_db_attribute *attrib);
+
+struct gatt_db_attribute *
+gatt_db_attribute_get_service(const struct gatt_db_attribute *attrib);
 
 bool gatt_db_attribute_get_service_uuid(const struct gatt_db_attribute *attrib,
 							bt_uuid_t *uuid);
@@ -254,6 +257,9 @@ bool gatt_db_attribute_get_incl_data(const struct gatt_db_attribute *attrib,
 uint32_t
 gatt_db_attribute_get_permissions(const struct gatt_db_attribute *attrib);
 
+bool gatt_db_attribute_set_fixed_length(struct gatt_db_attribute *attrib,
+						uint16_t len);
+
 typedef void (*gatt_db_attribute_read_t) (struct gatt_db_attribute *attrib,
 						int err, const uint8_t *value,
 						size_t length, void *user_data);
@@ -277,6 +283,15 @@ bool gatt_db_attribute_write(struct gatt_db_attribute *attrib, uint16_t offset,
 
 bool gatt_db_attribute_write_result(struct gatt_db_attribute *attrib,
 						unsigned int id, int err);
+
+struct gatt_db_attribute *
+gatt_db_attribute_get_value(struct gatt_db_attribute *attrib);
+struct gatt_db_attribute *
+gatt_db_attribute_get_ccc(struct gatt_db_attribute *attrib);
+
+bool gatt_db_attribute_notify(struct gatt_db_attribute *attrib,
+					const uint8_t *value, size_t len,
+					struct bt_att *att);
 
 bool gatt_db_attribute_reset(struct gatt_db_attribute *attrib);
 

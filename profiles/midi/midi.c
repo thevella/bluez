@@ -1,28 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2015,2016 Felipe F. Tonello <eu@felipetonello.com>
  *  Copyright (C) 2016 ROLI Ltd.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
- *  Information about this plugin:
- *
- *  This plugin implements the MIDI over Bluetooth Low-Energy (BLE-MIDI) 1.0
- *  specification as published by MMA in November/2015.
  *
  */
 
@@ -71,19 +53,20 @@ struct midi {
 	struct midi_write_parser midi_out;
 };
 
+static void foreach_cb(const struct midi_write_parser *parser, void *user_data)
+{
+	struct midi *midi = user_data;
+
+	bt_gatt_client_write_without_response(midi->client,
+						midi->midi_io_handle, false,
+						midi_write_data(parser),
+						midi_write_data_size(parser));
+}
+
 static bool midi_write_cb(struct io *io, void *user_data)
 {
 	struct midi *midi = user_data;
 	int err;
-
-	void foreach_cb(const struct midi_write_parser *parser, void *user_data) {
-		struct midi *midi = user_data;
-		bt_gatt_client_write_without_response(midi->client,
-		                                      midi->midi_io_handle,
-		                                      false,
-		                                      midi_write_data(parser),
-		                                      midi_write_data_size(parser));
-	};
 
 	do {
 		snd_seq_event_t *event = NULL;
@@ -99,10 +82,10 @@ static bool midi_write_cb(struct io *io, void *user_data)
 
 	if (midi_write_has_data(&midi->midi_out))
 		bt_gatt_client_write_without_response(midi->client,
-		                                      midi->midi_io_handle,
-		                                      false,
-		                                      midi_write_data(&midi->midi_out),
-		                                      midi_write_data_size(&midi->midi_out));
+					midi->midi_io_handle,
+					false,
+					midi_write_data(&midi->midi_out),
+					midi_write_data_size(&midi->midi_out));
 
 	midi_write_reset(&midi->midi_out);
 
@@ -271,6 +254,15 @@ static void midi_device_remove(struct btd_service *service)
 	if (!midi) {
 		error("MIDI Service not handled by profile");
 		return;
+	}
+
+	if (midi->seq_handle) {
+		midi_read_free(&midi->midi_in);
+		midi_write_free(&midi->midi_out);
+		io_destroy(midi->io);
+		snd_seq_delete_simple_port(midi->seq_handle, midi->seq_port_id);
+		midi->seq_port_id = 0;
+		snd_seq_close(midi->seq_handle);
 	}
 
 	btd_device_unref(midi->dev);

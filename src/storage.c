@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2006-2010  Nokia Corporation
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -56,21 +43,11 @@ struct match {
 	char *pattern;
 };
 
-static inline int create_filename(char *buf, size_t size,
-				const bdaddr_t *bdaddr, const char *name)
-{
-	char addr[18];
-
-	ba2str(bdaddr, addr);
-
-	return create_name(buf, size, STORAGEDIR, addr, name);
-}
-
 int read_discoverable_timeout(const char *src, int *timeout)
 {
 	char filename[PATH_MAX], *str;
 
-	create_name(filename, PATH_MAX, STORAGEDIR, src, "config");
+	create_name(filename, PATH_MAX, src, "config");
 
 	str = textfile_get(filename, "discovto");
 	if (!str)
@@ -90,7 +67,7 @@ int read_pairable_timeout(const char *src, int *timeout)
 {
 	char filename[PATH_MAX], *str;
 
-	create_name(filename, PATH_MAX, STORAGEDIR, src, "config");
+	create_name(filename, PATH_MAX, src, "config");
 
 	str = textfile_get(filename, "pairto");
 	if (!str)
@@ -110,7 +87,7 @@ int read_on_mode(const char *src, char *mode, int length)
 {
 	char filename[PATH_MAX], *str;
 
-	create_name(filename, PATH_MAX, STORAGEDIR, src, "config");
+	create_name(filename, PATH_MAX, src, "config");
 
 	str = textfile_get(filename, "onmode");
 	if (!str)
@@ -128,8 +105,11 @@ int read_local_name(const bdaddr_t *bdaddr, char *name)
 {
 	char filename[PATH_MAX], *str;
 	int len;
+	char addr[18];
 
-	create_filename(filename, PATH_MAX, bdaddr, "config");
+	ba2str(bdaddr, addr);
+
+	create_filename(filename, PATH_MAX, "/%s/config", addr);
 
 	str = textfile_get(filename, "name");
 	if (!str)

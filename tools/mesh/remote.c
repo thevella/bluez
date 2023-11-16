@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2019-2020  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
- *  Lesser General Public License for more details.
  *
  */
 
@@ -34,35 +25,38 @@
 
 #define abs_diff(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
 
+struct remote_key {
+	uint16_t idx;
+	bool updated;
+};
+
+struct foreach_data {
+	remote_foreach_t each;
+	void *user_data;
+	uint16_t dst;
+};
+
 struct remote_node {
 	uint16_t unicast;
 	struct l_queue *net_keys;
 	struct l_queue *app_keys;
 	struct l_queue **els;
+	bool comp;
 	uint8_t uuid[16];
 	uint8_t num_ele;
 };
 
-struct blacklisted_addr {
+struct rejected_addr {
 	uint32_t iv_index;
 	uint16_t unicast;
 };
 
 static struct l_queue *nodes;
-static struct l_queue *blacklisted;
+static struct l_queue *reject_list;
 
-static bool key_present(struct l_queue *keys, uint16_t app_idx)
+static bool match_mod_id(const void *a, const void *b)
 {
-	const struct l_queue_entry *l;
-
-	for (l = l_queue_get_entries(keys); l; l = l->next) {
-		uint16_t idx = L_PTR_TO_UINT(l->data);
-
-		if (idx == app_idx)
-			return true;
-	}
-
-	return false;
+	return a == b;
 }
 
 static int compare_mod_id(const void *a, const void *b, void *user_data)
@@ -111,12 +105,20 @@ static bool match_node_addr(const void *a, const void *b)
 	return false;
 }
 
+static bool match_key(const void *a, const void *b)
+{
+	const struct remote_key *key = a;
+	uint16_t idx = L_PTR_TO_UINT(b);
+
+	return (key->idx == idx);
+}
+
 static bool match_bound_key(const void *a, const void *b)
 {
-	uint16_t app_idx = L_PTR_TO_UINT(a);
+	const struct remote_key *app_key = a;
 	uint16_t net_idx = L_PTR_TO_UINT(b);
 
-	return (net_idx == keys_get_bound_key(app_idx));
+	return (net_idx == keys_get_bound_key(app_key->idx));
 }
 
 uint8_t remote_del_node(uint16_t unicast)
@@ -133,7 +135,7 @@ uint8_t remote_del_node(uint16_t unicast)
 
 	for (i = 0; i < num_ele; ++i) {
 		l_queue_destroy(rmt->els[i], NULL);
-		remote_add_blacklisted_address(unicast + i, iv_index, true);
+		remote_add_rejected_address(unicast + i, iv_index, true);
 	}
 
 	l_free(rmt->els);
@@ -147,10 +149,45 @@ uint8_t remote_del_node(uint16_t unicast)
 	return num_ele;
 }
 
+bool remote_reset_node(uint16_t original, uint16_t unicast, uint8_t ele_cnt,
+							uint32_t iv_index)
+{
+	struct remote_node *rmt;
+	bool reject = true;
+	int i;
+
+	rmt = l_queue_remove_if(nodes, match_node_addr,
+						L_UINT_TO_PTR(original));
+	if (!rmt)
+		return false;
+
+	if (unicast == rmt->unicast)
+		reject = false;
+
+	for (i = 0; i < rmt->num_ele; ++i) {
+		l_queue_destroy(rmt->els[i], NULL);
+		if (reject)
+			remote_add_rejected_address(rmt->unicast + i,
+								iv_index, true);
+	}
+
+	if (ele_cnt != rmt->num_ele) {
+		l_free(rmt->els);
+		rmt->els = l_new(struct l_queue *, ele_cnt);
+	} else
+		memset(rmt->els, 0, sizeof(struct l_queue *) * ele_cnt);
+
+	rmt->unicast = unicast;
+	rmt->num_ele = ele_cnt;
+	l_queue_insert(nodes, rmt, compare_unicast, NULL);
+	return true;
+}
+
 bool remote_add_node(const uint8_t uuid[16], uint16_t unicast,
 					uint8_t ele_cnt, uint16_t net_idx)
 {
 	struct remote_node *rmt;
+	struct remote_key *key;
 
 	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(unicast));
 	if (rmt)
@@ -162,7 +199,10 @@ bool remote_add_node(const uint8_t uuid[16], uint16_t unicast,
 	rmt->num_ele = ele_cnt;
 	rmt->net_keys = l_queue_new();
 
-	l_queue_push_tail(rmt->net_keys, L_UINT_TO_PTR(net_idx));
+	key = l_new(struct remote_key, 1);
+	key->idx = net_idx;
+
+	l_queue_push_tail(rmt->net_keys, key);
 
 	rmt->els = l_new(struct l_queue *, ele_cnt);
 
@@ -170,6 +210,7 @@ bool remote_add_node(const uint8_t uuid[16], uint16_t unicast,
 		nodes = l_queue_new();
 
 	l_queue_insert(nodes, rmt, compare_unicast, NULL);
+
 	return true;
 }
 
@@ -191,13 +232,28 @@ bool remote_set_model(uint16_t unicast, uint8_t ele_idx, uint32_t mod_id,
 	if (!vendor)
 		mod_id = VENDOR_ID_MASK | mod_id;
 
+	if (l_queue_find(rmt->els[ele_idx], match_mod_id,
+							L_UINT_TO_PTR(mod_id)))
+		return true;
+
 	l_queue_insert(rmt->els[ele_idx], L_UINT_TO_PTR(mod_id),
 							compare_mod_id, NULL);
 
 	return true;
 }
 
-bool remote_add_net_key(uint16_t addr, uint16_t net_idx)
+void remote_set_composition(uint16_t addr, bool comp)
+{
+	struct remote_node *rmt;
+
+	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
+	if (!rmt)
+		return;
+
+	rmt->comp = comp;
+}
+
+bool remote_has_composition(uint16_t addr)
 {
 	struct remote_node *rmt;
 
@@ -205,41 +261,90 @@ bool remote_add_net_key(uint16_t addr, uint16_t net_idx)
 	if (!rmt)
 		return false;
 
-	if (key_present(rmt->net_keys, net_idx))
+	return rmt->comp;
+}
+
+bool remote_add_net_key(uint16_t addr, uint16_t net_idx, bool save)
+{
+	struct remote_node *rmt;
+	struct remote_key *key;
+
+	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
+	if (!rmt)
 		return false;
 
-	l_queue_push_tail(rmt->net_keys, L_UINT_TO_PTR(net_idx));
-	return true;
+	if (l_queue_find(rmt->net_keys, match_key, L_UINT_TO_PTR(net_idx)))
+		return true;
+
+	key = l_new(struct remote_key, 1);
+	key->idx = net_idx;
+
+	l_queue_push_tail(rmt->net_keys, key);
+
+	if (save)
+		return mesh_db_node_add_net_key(addr, net_idx);
+	else
+		return true;
 }
 
 bool remote_del_net_key(uint16_t addr, uint16_t net_idx)
 {
 	struct remote_node *rmt;
-	void *data;
+	struct remote_key *key;
 
 	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
 	if (!rmt)
 		return false;
 
-	if (!l_queue_remove(rmt->net_keys, L_UINT_TO_PTR(net_idx)))
+	key = l_queue_remove_if(rmt->net_keys, match_key,
+							L_UINT_TO_PTR(net_idx));
+	if (!key)
 		return false;
 
-	data = l_queue_remove_if(rmt->app_keys, match_bound_key,
-						L_UINT_TO_PTR(net_idx));
-	while (data) {
-		uint16_t app_idx = (uint16_t) L_PTR_TO_UINT(data);
+	mesh_db_node_del_net_key(addr, net_idx);
 
-		mesh_db_node_app_key_del(rmt->unicast, app_idx);
-		data = l_queue_remove_if(rmt->app_keys, match_bound_key,
+	l_free(key);
+	key = l_queue_remove_if(rmt->app_keys, match_bound_key,
+						L_UINT_TO_PTR(net_idx));
+
+	while (key) {
+		mesh_db_node_del_app_key(rmt->unicast, key->idx);
+		l_free(key);
+
+		key = l_queue_remove_if(rmt->app_keys, match_bound_key,
 						L_UINT_TO_PTR(net_idx));
 	}
 
 	return true;
 }
 
-bool remote_add_app_key(uint16_t addr, uint16_t app_idx)
+bool remote_update_net_key(uint16_t addr, uint16_t net_idx, bool update,
+								bool save)
 {
 	struct remote_node *rmt;
+	struct remote_key *key;
+
+	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
+	if (!rmt)
+		return false;
+
+	key = l_queue_find(rmt->net_keys, match_key,
+						L_UINT_TO_PTR(net_idx));
+	if (!key)
+		return false;
+
+	key->updated = update;
+
+	if (save)
+		return mesh_db_node_update_net_key(addr, net_idx, update);
+	else
+		return true;
+}
+
+bool remote_add_app_key(uint16_t addr, uint16_t app_idx, bool save)
+{
+	struct remote_node *rmt;
+	struct remote_key *key;
 
 	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
 	if (!rmt)
@@ -248,44 +353,110 @@ bool remote_add_app_key(uint16_t addr, uint16_t app_idx)
 	if (!rmt->app_keys)
 		rmt->app_keys = l_queue_new();
 
-	if (key_present(rmt->app_keys, app_idx))
-		return false;
+	if (l_queue_find(rmt->app_keys, match_key, L_UINT_TO_PTR(app_idx)))
+		return true;
 
-	l_queue_push_tail(rmt->app_keys, L_UINT_TO_PTR(app_idx));
-	return true;
+	key = l_new(struct remote_key, 1);
+	key->idx = app_idx;
+
+	l_queue_push_tail(rmt->app_keys, key);
+
+	if (save)
+		return mesh_db_node_add_app_key(addr, app_idx);
+	else
+		return true;
 }
 
 bool remote_del_app_key(uint16_t addr, uint16_t app_idx)
 {
 	struct remote_node *rmt;
+	struct remote_key *key;
 
 	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
 	if (!rmt)
 		return false;
 
-	return l_queue_remove(rmt->app_keys, L_UINT_TO_PTR(app_idx));
+	key = l_queue_remove_if(rmt->app_keys, match_key,
+						L_UINT_TO_PTR(app_idx));
+	l_free(key);
+
+	return mesh_db_node_del_app_key(addr, app_idx);
+}
+
+bool remote_update_app_key(uint16_t addr, uint16_t app_idx, bool update,
+								bool save)
+{
+	struct remote_node *rmt;
+	struct remote_key *key;
+
+	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
+	if (!rmt)
+		return false;
+
+	key = l_queue_find(rmt->app_keys, match_key,
+						L_UINT_TO_PTR(app_idx));
+	if (!key)
+		return false;
+
+	key->updated = update;
+
+	if (save)
+		return mesh_db_node_update_app_key(addr, app_idx, update);
+	else
+		return true;
+}
+
+bool remote_finish_key_refresh(uint16_t addr, uint16_t net_idx)
+{
+	struct remote_node *rmt;
+	struct remote_key *key;
+	const struct l_queue_entry *l;
+	bool res = true;
+
+	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
+	if (!rmt)
+		return false;
+
+	if (!remote_update_net_key(addr, net_idx, false, true))
+		return false;
+
+	l = l_queue_get_entries(rmt->app_keys);
+
+	for (; l; l = l->next) {
+		key = l->data;
+
+		if (net_idx != keys_get_bound_key(key->idx))
+			continue;
+
+		key->updated = false;
+
+		res &= mesh_db_node_update_app_key(addr, key->idx, false);
+	}
+
+	return res;
 }
 
 uint16_t remote_get_subnet_idx(uint16_t addr)
 {
 	struct remote_node *rmt;
-	uint32_t net_idx;
+	struct remote_key *key;
 
 	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(addr));
 
 	if (!rmt || l_queue_isempty(rmt->net_keys))
 		return NET_IDX_INVALID;
 
-	net_idx = L_PTR_TO_UINT(l_queue_peek_head(rmt->net_keys));
+	key = l_queue_peek_head(rmt->net_keys);
 
-	return (uint16_t) net_idx;
+	return key->idx;
 }
 
-static void print_key(void *key, void *user_data)
+static void print_key(void *data, void *user_data)
 {
-	uint16_t idx = L_PTR_TO_UINT(key);
+	struct remote_key *key = data;
 
-	bt_shell_printf("%u (0x%3.3x), ", idx, idx);
+	bt_shell_printf("%u (0x%3.3x) %s, ", key->idx, key->idx,
+						key->updated ? ", updated":"");
 }
 
 static void print_model(void *model, void *user_data)
@@ -342,9 +513,9 @@ static void print_node(void *rmt, void *user_data)
 		print_element(node->els[i], i);
 }
 
-static bool match_black_addr(const void *a, const void *b)
+static bool match_rejected_addr(const void *a, const void *b)
 {
-	const struct blacklisted_addr *addr = a;
+	const struct rejected_addr *addr = a;
 	uint16_t unicast = L_PTR_TO_UINT(b);
 
 	return addr->unicast == unicast;
@@ -357,11 +528,11 @@ static uint16_t get_next_addr(uint16_t high, uint16_t addr,
 		int i = 0;
 
 		for (i = 0; i < ele_cnt; i++) {
-			struct blacklisted_addr *black;
+			struct rejected_addr *reject;
 
-			black = l_queue_find(blacklisted, match_black_addr,
+			reject = l_queue_find(reject_list, match_rejected_addr,
 						L_UINT_TO_PTR(addr + i));
-			if (!black)
+			if (!reject)
 				break;
 		}
 
@@ -376,10 +547,10 @@ static uint16_t get_next_addr(uint16_t high, uint16_t addr,
 
 static bool check_iv_index(const void *a, const void *b)
 {
-	const struct blacklisted_addr *black_addr = a;
+	const struct rejected_addr *reject = a;
 	uint32_t iv_index = L_PTR_TO_UINT(b);
 
-	return (abs_diff(iv_index, black_addr->iv_index) > 2);
+	return (abs_diff(iv_index, reject->iv_index) > 2);
 }
 
 void remote_print_node(uint16_t addr)
@@ -402,6 +573,76 @@ void remote_print_all(void)
 		return;
 
 	l_queue_foreach(nodes, print_node, NULL);
+}
+
+static void each_node(void *rmt, void *user_data)
+{
+	struct remote_node *node = rmt;
+	struct foreach_data *data = user_data;
+
+	data->each(data->user_data, node->unicast, (uint32_t) -1);
+}
+
+static void each_addr(void *rmt, void *user_data)
+{
+	struct remote_node *node = rmt;
+	struct foreach_data *data = user_data;
+	uint16_t cnt;
+
+	for (cnt = 0; cnt <= node->num_ele; cnt++)
+		data->each(data->user_data, node->unicast + cnt, (uint32_t) -1);
+}
+
+static void parse_model(void *model, void *user_data)
+{
+	struct foreach_data *data = user_data;
+
+	data->each(data->user_data, data->dst, L_PTR_TO_UINT(model));
+}
+
+static void each_model(void *rmt, void *user_data)
+{
+	struct remote_node *node = rmt;
+	struct foreach_data *data = user_data;
+	uint16_t cnt;
+
+	for (cnt = 0; cnt < node->num_ele; cnt++) {
+		data->dst = node->unicast + cnt;
+		l_queue_foreach(node->els[cnt], parse_model, data);
+	}
+}
+
+void remote_foreach(remote_foreach_t each, void *user_data)
+{
+	struct foreach_data data = {
+		.each = each,
+		.user_data = user_data
+	};
+
+	if (each)
+		l_queue_foreach(nodes, each_node, &data);
+}
+
+void remote_foreach_unicast(remote_foreach_t each, void *user_data)
+{
+	struct foreach_data data = {
+		.each = each,
+		.user_data = user_data
+	};
+
+	if (each)
+		l_queue_foreach(nodes, each_addr, &data);
+}
+
+void remote_foreach_model(remote_foreach_t each, void *user_data)
+{
+	struct foreach_data data = {
+		.each = each,
+		.user_data = user_data
+	};
+
+	if (each)
+		l_queue_foreach(nodes, each_model, &data);
 }
 
 uint16_t remote_get_next_unicast(uint16_t low, uint16_t high, uint8_t ele_cnt)
@@ -444,36 +685,47 @@ uint16_t remote_get_next_unicast(uint16_t low, uint16_t high, uint8_t ele_cnt)
 	return addr;
 }
 
-void remote_add_blacklisted_address(uint16_t addr, uint32_t iv_index,
-								bool save)
+void remote_add_rejected_address(uint16_t addr, uint32_t iv_index, bool save)
 {
-	struct blacklisted_addr *black_addr;
+	struct rejected_addr *reject;
 
-	if (!blacklisted)
-		blacklisted = l_queue_new();
+	if (!reject_list)
+		reject_list = l_queue_new();
 
-	black_addr = l_new(struct blacklisted_addr, 1);
-	black_addr->unicast = addr;
-	black_addr->iv_index = iv_index;
+	reject = l_new(struct rejected_addr, 1);
+	reject->unicast = addr;
+	reject->iv_index = iv_index;
 
-	l_queue_push_tail(blacklisted, black_addr);
+	l_queue_push_tail(reject_list, reject);
 
 	if (save)
-		mesh_db_add_blacklisted_addr(addr, iv_index);
+		mesh_db_add_rejected_addr(addr, iv_index);
 }
 
-void remote_clear_blacklisted_addresses(uint32_t iv_index)
+void remote_clear_rejected_addresses(uint32_t iv_index)
 {
-	struct blacklisted_addr *black_addr;
+	struct rejected_addr *reject;
 
-	black_addr = l_queue_remove_if(blacklisted, check_iv_index,
+	reject = l_queue_remove_if(reject_list, check_iv_index,
 						L_UINT_TO_PTR(iv_index));
 
-	while (black_addr) {
-		l_free(black_addr);
-		black_addr = l_queue_remove_if(blacklisted, check_iv_index,
+	while (reject) {
+		l_free(reject);
+		reject = l_queue_remove_if(reject_list, check_iv_index,
 						L_UINT_TO_PTR(iv_index));
 	}
 
-	mesh_db_clear_blacklisted(iv_index);
+	mesh_db_clear_rejected(iv_index);
+}
+
+uint8_t remote_ele_cnt(uint16_t unicast)
+{
+	struct remote_node *rmt;
+
+	rmt = l_queue_find(nodes, match_node_addr, L_UINT_TO_PTR(unicast));
+
+	if (rmt)
+		return rmt->num_ele;
+
+	return 0;
 }

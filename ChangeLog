@@ -1,3 +1,120 @@
+ver 5.70:
+	Fix issue with not sending GATT confirmations.
+	Fix issue with not handling initiator properly.
+	Fix issue with not checking PBAP counter length.
+	Add support for MICP profile and MICS service.
+
+ver 5.69:
+	Fix issue with BAP enabling state correctly when resuming.
+	Fix issue with detaching source ASEs only after Stop Ready.
+	Fix issue with handling VCP audio location and descriptor.
+	Fix issue with generating IRK for adapter with privacy enabled.
+	Add support for BAP broadcast sink.
+
+ver 5.68:
+	Fix issue with A2DP and handling of Transport.Acquire.
+
+ver 5.67:
+	Fix issue with BAP and initiating QoS and Enable procedures.
+	Fix issue with BAP and detaching streams when PAC is removed.
+	Fix issue with BAP and reading all instances of PAC.
+	Fix issue with BAP and not being able to reconfigure.
+	Fix issue with BAP and transport configuration changes.
+	Fix issue with BAP and handling unexpected disconnect.
+	Fix issue with GATT and not removing pending services.
+	Fix issue with GATT and client ready handling.
+	Fix issue with handling fallback to transient hostname.
+	Add support for SecureConnections configuration option.
+	Add support for Mesh Remove Provisioning.
+	Add support for Mesh Private Beacons.
+
+ver 5.66:
+	Fix issue with A2DP and transport connection collisions.
+	Fix issue with allowing application specific error codes.
+	Fix issue with not setting initiator flag correctly.
+	Fix issue with HoG Report MAP size handling.
+	Add initial support for Basic Audio Profile.
+	Add initial support for Volume Control Profile.
+
+ver 5.65:
+	Fix issue with A2DP cache invalidation handling.
+	Fix issue with A2DP and not initialized SEP codec.
+	Fix issue with A2DP and multiple SetConfiguration to same SEP
+	Fix issue with AVRCP and not properly initialized volume.
+	Fix issue with SDP records when operating in LE only mode.
+	Fix issue with HoG and not reading report map of instances.
+	Fix issue with GATT server crashing while disconnecting.
+	Fix issue with not removing connected devices.
+	Fix issue with enabling wake support without RPA Resolution.
+	Fix issue with pairing failed due to the error of Already Paired.
+	Add support for CONFIGURATION_DIRECTORY environment variable.
+	Add support for STATE_DIRECTORY environment variable.
+	Add support for "Bonded" property with Device API.
+	Add experimental support for ISO socket.
+
+ver 5.64:
+	Fix issue with handling A2DP discover procedure.
+	Fix issue with media endpoint replies and SetConfiguration.
+	Fix issue with HoG queuing events before report map is read.
+	Fix issue with HoG and read order of GATT attributes.
+	Fix issue with HoG and not using UHID_CREATE2 interface.
+	Fix issue with failed scanning for 5 minutes after reboot.
+
+ver 5.63:
+	Fix issue with storing IRK causing invalid read access.
+	Fix issue with disconnecting due to GattCharacteristic1.MTU.
+	Add support for Device{Found,Lost} of advertising monitoring.
+
+ver 5.62:
+	Fix issue with handling truncation when loading LTKs.
+	Fix issue with accepting Exchange MTU on EATT bearer.
+	Fix issue with clearing DeviceLost timers on power down.
+	Fix issue with AVCTP browsing channel and missing ERTM.
+	Fix issue with AVDTP and local SEID pool for each adapter.
+	Add support for BR/EDR and LE connection failure reasons.
+
+ver 5.61:
+	Fix issue with A2DP while waiting for command response.
+	Fix issue with A2DP when SetConfiguration fails.
+	Fix issue with device removal handling.
+	Fix issue with storing discoverable setting.
+	Add support for Central Address Resolution characteristic.
+	Add support for admin policy plugin.
+
+ver 5.60:
+	Fix issue with reading from RFKILL device node.
+	Fix issue with AVDTP and parsing capabilities.
+	Fix issue with UnregisterApplication handling.
+	Fix issue with RegisterProfile if UUID already exists.
+	Fix issue with GATT client attribute read with offset.
+	Fix issue with non-discoverable device and advertising monitor.
+
+ver 5.59:
+	Fix issue with string to UUID-32 conversion.
+	Fix issue with connect request if SDP search failed.
+	Fix issue with accepting invalid AVDTP capabilities.
+	Fix issue with unregister handling of AVRCP player.
+
+ver 5.58:
+	Fix issue with usage of deprecated GLib functions.
+
+ver 5.57:
+	Fix issue with handling GATT notification PDU parsing.
+	Fix issue with registering DIS without a valid source.
+	Fix issue with removing remote SEPs when loading from cache.
+
+ver 5.56:
+	Fix issue with setting AVDTP disconnect timer.
+	Fix issue with AVDTP not sending GetCapabilities.
+	Fix issue with AVDTP connecting using streaming mode.
+	Fix issue with handling A2DP and remote SEP disappearing.
+	Fix issue with handling session of A2DP channels.
+	Fix issue with GATT and handling device removal.
+	Fix issue with GATT not accepting multiple requests.
+	Fix issue with HID report value callback registration.
+	Add support for new advertising management command.
+	Add support for battery D-Bus interface.
+
 ver 5.55:
 	Fix issue with handling security level for HoG.
 	Fix issue with handling HIDSDPDisable attribute.

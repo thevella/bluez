@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -188,6 +175,7 @@ static void print_service_proxy(GDBusProxy *proxy, const char *description)
 
 	dbus_message_iter_get_basic(&iter, &primary);
 
+	memset(&service, 0, sizeof(service));
 	service.path = (char *) g_dbus_proxy_get_path(proxy);
 	service.uuid = (char *) uuid;
 	service.primary = primary;
@@ -270,6 +258,7 @@ static void print_characteristic(GDBusProxy *proxy, const char *description)
 
 	dbus_message_iter_get_basic(&iter, &uuid);
 
+	memset(&chrc, 0, sizeof(chrc));
 	chrc.path = (char *) g_dbus_proxy_get_path(proxy);
 	chrc.uuid = (char *) uuid;
 
@@ -363,6 +352,7 @@ static void print_descriptor(GDBusProxy *proxy, const char *description)
 
 	dbus_message_iter_get_basic(&iter, &uuid);
 
+	memset(&desc, 0, sizeof(desc));
 	desc.path = (char *) g_dbus_proxy_get_path(proxy);
 	desc.uuid = (char *) uuid;
 
@@ -564,6 +554,241 @@ GDBusProxy *gatt_select_attribute(GDBusProxy *parent, const char *arg)
 	return select_attribute_by_uuid(NULL, arg);
 }
 
+static char *find_local_attribute(const char *arg,
+					struct service **service,
+					struct chrc **chrc, struct desc **desc)
+{
+	GList *l;
+
+	for (l = local_services; l; l = g_list_next(l)) {
+		struct service *s = l->data;
+		GList *cl;
+
+		if (!strcmp(arg, s->path)) {
+			if (service)
+				*service = s;
+			return s->path;
+		}
+
+		if (!strcmp(arg, s->uuid)) {
+			if (service)
+				*service = s;
+			return s->path;
+		}
+
+		for (cl = s->chrcs; cl; cl = g_list_next(cl)) {
+			struct chrc *c = cl->data;
+			GList *dl;
+
+			if (!strcmp(arg, c->path)) {
+				if (chrc)
+					*chrc = c;
+				return c->path;
+			}
+
+			if (!strcmp(arg, c->uuid)) {
+				if (chrc)
+					*chrc = c;
+				return c->path;
+			}
+
+			for (dl = c->descs; dl; dl = g_list_next(dl)) {
+				struct desc *d = dl->data;
+
+				if (!strcmp(arg, d->path)) {
+					if (desc)
+						*desc = d;
+					return d->path;
+				}
+
+				if (!strcmp(arg, d->uuid)) {
+					if (desc)
+						*desc = d;
+					return d->path;
+				}
+			}
+		}
+	}
+
+	return NULL;
+}
+
+char *gatt_select_local_attribute(const char *arg)
+{
+	return find_local_attribute(arg, NULL, NULL, NULL);
+}
+
+static int parse_offset(const char *arg)
+{
+	char *endptr = NULL;
+	unsigned long offset;
+
+	offset = strtoul(arg, &endptr, 0);
+	if (!endptr || *endptr != '\0' || offset > UINT16_MAX) {
+		bt_shell_printf("Invalid offload: %s", arg);
+		return -EINVAL;
+	}
+
+	return offset;
+}
+
+void gatt_read_local_attribute(char *data, int argc, char *argv[])
+{
+	int offset = 0;
+	struct service *s = NULL;
+	struct chrc *c = NULL;
+	struct desc *d = NULL;
+
+	if (!find_local_attribute(data, &s, &c, &d)) {
+		bt_shell_printf("Unable to find local attribute %s\n", data);
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+	}
+
+	if (argc > 1) {
+		offset = parse_offset(argv[1]);
+		if (offset < 0)
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+	}
+
+	if (s) {
+		bt_shell_printf("UUID %s", s->uuid);
+		return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+	}
+
+	if (c) {
+		if ((size_t)offset >= c->value_len) {
+			bt_shell_printf("Invalid offset: %d >= %zd", offset,
+								c->value_len);
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+		}
+		bt_shell_hexdump(&c->value[offset], c->value_len - offset);
+		return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+	}
+
+	if (d) {
+		if ((size_t)offset >= d->value_len) {
+			bt_shell_printf("Invalid offset: %d >= %zd", offset,
+								d->value_len);
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+		}
+		bt_shell_hexdump(&d->value[offset], d->value_len - offset);
+		return bt_shell_noninteractive_quit(EXIT_SUCCESS);
+	}
+}
+
+static uint8_t *str2bytearray(char *arg, size_t *val_len)
+{
+	uint8_t value[MAX_ATTR_VAL_LEN];
+	char *entry;
+	unsigned int i;
+
+	for (i = 0; (entry = strsep(&arg, " \t")) != NULL; i++) {
+		long val;
+		char *endptr = NULL;
+
+		if (*entry == '\0')
+			continue;
+
+		if (i >= G_N_ELEMENTS(value)) {
+			bt_shell_printf("Too much data\n");
+			return NULL;
+		}
+
+		val = strtol(entry, &endptr, 0);
+		if (!endptr || *endptr != '\0' || val > UINT8_MAX) {
+			bt_shell_printf("Invalid value at index %d\n", i);
+			return NULL;
+		}
+
+		value[i] = val;
+	}
+
+	*val_len = i;
+
+	return util_memdup(value, i);
+}
+
+static int write_value(size_t *dst_len, uint8_t **dst_value, uint8_t *src_val,
+			size_t src_len, uint16_t offset, uint16_t max_len)
+{
+	if ((offset + src_len) > max_len)
+		return -EOVERFLOW;
+
+	if ((offset + src_len) != *dst_len) {
+		*dst_len = offset + src_len;
+		*dst_value = g_realloc(*dst_value, *dst_len);
+	}
+
+	if (src_val && src_len)
+		memcpy(*dst_value + offset, src_val, src_len);
+
+	return 0;
+}
+
+void gatt_write_local_attribute(char *data, int argc, char *argv[])
+{
+	int offset = 0;
+	struct service *s = NULL;
+	struct chrc *c = NULL;
+	struct desc *d = NULL;
+	uint8_t *value;
+	size_t value_len;
+
+	if (!find_local_attribute(data, &s, &c, &d)) {
+		bt_shell_printf("Unable to find local attribute %s\n", data);
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+	}
+
+	value = str2bytearray(argv[1], &value_len);
+	if (!value)
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+
+	if (argc > 2) {
+		offset = parse_offset(argv[2]);
+		if (offset < 0)
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+	}
+
+	if (s) {
+		bt_shell_printf("Unable to overwrite local service %s\n", data);
+		return bt_shell_noninteractive_quit(EXIT_FAILURE);
+	}
+
+	if (c) {
+		if (write_value(&c->value_len, &c->value,
+					value, value_len,
+					offset, c->max_val_len)) {
+			bt_shell_printf("Unable to write local attribute %s\n",
+									data);
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+		}
+
+		bt_shell_printf("[" COLORED_CHG "] Attribute %s (%s) written\n",
+				c->path, bt_uuidstr_to_str(c->uuid));
+
+		g_dbus_emit_property_changed(c->service->conn, c->path,
+					     CHRC_INTERFACE, "Value");
+	}
+
+	if (d) {
+		if (write_value(&d->value_len, &d->value,
+					value, value_len,
+					offset, d->max_val_len)) {
+			bt_shell_printf("Unable to write local attribute %s\n",
+									data);
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+		}
+
+		bt_shell_printf("[" COLORED_CHG "] Attribute %s (%s) written\n",
+				d->path, bt_uuidstr_to_str(d->uuid));
+
+		g_dbus_emit_property_changed(d->chrc->service->conn, d->path,
+					     DESC_INTERFACE, "Value");
+	}
+
+	free(value);
+}
+
 static char *attribute_generator(const char *text, int state, GList *source)
 {
 	static int index;
@@ -663,19 +888,23 @@ static void read_attribute(GDBusProxy *proxy, uint16_t offset)
 void gatt_read_attribute(GDBusProxy *proxy, int argc, char *argv[])
 {
 	const char *iface;
-	uint16_t offset = 0;
+	int offset = 0;
 
 	iface = g_dbus_proxy_get_interface(proxy);
 	if (!strcmp(iface, "org.bluez.GattCharacteristic1") ||
 				!strcmp(iface, "org.bluez.GattDescriptor1")) {
 
-		if (argc == 2)
-			offset = atoi(argv[1]);
+		if (argc == 2) {
+			offset = parse_offset(argv[1]);
+			if (offset < 0)
+				goto fail;
+		}
 
 		read_attribute(proxy, offset);
 		return;
 	}
 
+fail:
 	bt_shell_printf("Unable to read attribute %s\n",
 						g_dbus_proxy_get_path(proxy));
 	return bt_shell_noninteractive_quit(EXIT_FAILURE);
@@ -774,38 +1003,6 @@ static void write_attribute(GDBusProxy *proxy,
 					g_dbus_proxy_get_path(proxy));
 }
 
-static uint8_t *str2bytearray(char *arg, size_t *val_len)
-{
-	uint8_t value[MAX_ATTR_VAL_LEN];
-	char *entry;
-	unsigned int i;
-
-	for (i = 0; (entry = strsep(&arg, " \t")) != NULL; i++) {
-		long int val;
-		char *endptr = NULL;
-
-		if (*entry == '\0')
-			continue;
-
-		if (i >= G_N_ELEMENTS(value)) {
-			bt_shell_printf("Too much data\n");
-			return NULL;
-		}
-
-		val = strtol(entry, &endptr, 0);
-		if (!endptr || *endptr != '\0' || val > UINT8_MAX) {
-			bt_shell_printf("Invalid value at index %d\n", i);
-			return NULL;
-		}
-
-		value[i] = val;
-	}
-
-	*val_len = i;
-
-	return g_memdup(value, i);
-}
-
 void gatt_write_attribute(GDBusProxy *proxy, int argc, char *argv[])
 {
 	const char *iface;
@@ -818,8 +1015,15 @@ void gatt_write_attribute(GDBusProxy *proxy, int argc, char *argv[])
 				!strcmp(iface, "org.bluez.GattDescriptor1")) {
 		data.iov.iov_base = str2bytearray(argv[1], &data.iov.iov_len);
 
-		if (argc > 2)
-			data.offset = atoi(argv[2]);
+		if (argc > 2) {
+			int offset;
+
+			offset = parse_offset(argv[2]);
+			if (offset < 0)
+				goto fail;
+
+			data.offset = offset;
+		}
 
 		if (argc > 3)
 			data.type = argv[3];
@@ -828,6 +1032,7 @@ void gatt_write_attribute(GDBusProxy *proxy, int argc, char *argv[])
 		return;
 	}
 
+fail:
 	bt_shell_printf("Unable to write attribute %s\n",
 						g_dbus_proxy_get_path(proxy));
 
@@ -1482,6 +1687,20 @@ static void service_set_primary(const char *input, void *user_data)
 	}
 }
 
+static uint16_t parse_handle(const char *arg)
+{
+	char *endptr = NULL;
+	unsigned long handle;
+
+	handle = strtoul(arg, &endptr, 0);
+	if (!endptr || *endptr != '\0' || !handle || handle > UINT16_MAX) {
+		bt_shell_printf("Invalid handle: %s", arg);
+		return 0;
+	}
+
+	return handle;
+}
+
 void gatt_register_service(DBusConnection *conn, GDBusProxy *proxy,
 						int argc, char *argv[])
 {
@@ -1495,8 +1714,13 @@ void gatt_register_service(DBusConnection *conn, GDBusProxy *proxy,
 					g_list_length(local_services));
 	service->primary = primary;
 
-	if (argc > 2)
-		service->handle = atoi(argv[2]);
+	if (argc > 2) {
+		service->handle = parse_handle(argv[2]);
+		if (!service->handle) {
+			service_free(service);
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+		}
+	}
 
 	if (g_dbus_register_interface(conn, service->path,
 					SERVICE_INTERFACE, NULL, NULL,
@@ -2097,22 +2321,6 @@ static int parse_value_arg(DBusMessageIter *iter, uint8_t **value, int *len)
 	return 0;
 }
 
-static int write_value(size_t *dst_len, uint8_t **dst_value, uint8_t *src_val,
-			size_t src_len, uint16_t offset, uint16_t max_len)
-{
-	if ((offset + src_len) > max_len)
-		return -EOVERFLOW;
-
-	if ((offset + src_len) != *dst_len) {
-		*dst_len = offset + src_len;
-		*dst_value = g_realloc(*dst_value, *dst_len);
-	}
-
-	memcpy(*dst_value + offset, src_val, src_len);
-
-	return 0;
-}
-
 static void authorize_write_response(const char *input, void *user_data)
 {
 	struct authorize_attribute_data *aad = user_data;
@@ -2483,7 +2691,7 @@ static DBusMessage *chrc_start_notify(DBusConnection *conn, DBusMessage *msg,
 
 	chrc->notifying = true;
 	bt_shell_printf("[" COLORED_CHG "] Attribute %s (%s) notifications "
-			"enabled", chrc->path, bt_uuidstr_to_str(chrc->uuid));
+			"enabled\n", chrc->path, bt_uuidstr_to_str(chrc->uuid));
 	g_dbus_emit_property_changed(conn, chrc->path, CHRC_INTERFACE,
 							"Notifying");
 
@@ -2503,7 +2711,8 @@ static DBusMessage *chrc_stop_notify(DBusConnection *conn, DBusMessage *msg,
 
 	chrc->notifying = false;
 	bt_shell_printf("[" COLORED_CHG "] Attribute %s (%s) notifications "
-			"disabled", chrc->path, bt_uuidstr_to_str(chrc->uuid));
+			"disabled\n", chrc->path,
+			bt_uuidstr_to_str(chrc->uuid));
 	g_dbus_emit_property_changed(conn, chrc->path, CHRC_INTERFACE,
 							"Notifying");
 
@@ -2587,8 +2796,13 @@ void gatt_register_chrc(DBusConnection *conn, GDBusProxy *proxy,
 	chrc->flags = g_strsplit(argv[2], ",", -1);
 	chrc->authorization_req = attr_authorization_flag_exists(chrc->flags);
 
-	if (argc > 3)
-		chrc->handle = atoi(argv[3]);
+	if (argc > 3) {
+		chrc->handle = parse_handle(argv[3]);
+		if (!chrc->handle) {
+			chrc_free(chrc);
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+		}
+	}
 
 	if (g_dbus_register_interface(conn, chrc->path, CHRC_INTERFACE,
 					chrc_methods, NULL, chrc_properties,
@@ -2713,7 +2927,7 @@ static DBusMessage *desc_write_value(DBusConnection *conn, DBusMessage *msg,
 	bt_shell_printf("[" COLORED_CHG "] Attribute %s (%s) written",
 			desc->path, bt_uuidstr_to_str(desc->uuid));
 
-	g_dbus_emit_property_changed(conn, desc->path, CHRC_INTERFACE, "Value");
+	g_dbus_emit_property_changed(conn, desc->path, DESC_INTERFACE, "Value");
 
 	return g_dbus_create_reply(msg, DBUS_TYPE_INVALID);
 }
@@ -2864,8 +3078,13 @@ void gatt_register_desc(DBusConnection *conn, GDBusProxy *proxy,
 					g_list_length(desc->chrc->descs));
 	desc->flags = g_strsplit(argv[2], ",", -1);
 
-	if (argc > 3)
-		desc->handle = atoi(argv[3]);
+	if (argc > 3) {
+		desc->handle = parse_handle(argv[3]);
+		if (!desc->handle) {
+			desc_free(desc);
+			return bt_shell_noninteractive_quit(EXIT_FAILURE);
+		}
+	}
 
 	if (g_dbus_register_interface(conn, desc->path, DESC_INTERFACE,
 					desc_methods, NULL, desc_properties,
@@ -2957,17 +3176,20 @@ static void proxy_property_changed(GDBusProxy *proxy, const char *name,
 			chrc->path, bt_uuidstr_to_str(chrc->uuid), name);
 
 	if (!strcmp(name, "Value")) {
-		DBusMessageIter array;
-		uint8_t *value;
-		int len;
+		uint8_t *value = '\0';  /* don't pass NULL to write_value() */
+		int len = 0;
 
-		if (dbus_message_iter_get_arg_type(iter) == DBUS_TYPE_ARRAY) {
+		if (iter && dbus_message_iter_get_arg_type(iter) ==
+				DBUS_TYPE_ARRAY) {
+			DBusMessageIter array;
+
 			dbus_message_iter_recurse(iter, &array);
 			dbus_message_iter_get_fixed_array(&array, &value, &len);
-			write_value(&chrc->value_len, &chrc->value, value, len,
-					0, chrc->max_val_len);
-			bt_shell_hexdump(value, len);
 		}
+
+		write_value(&chrc->value_len, &chrc->value, value, len,
+				0, chrc->max_val_len);
+		bt_shell_hexdump(value, len);
 	}
 
 	g_dbus_emit_property_changed(conn, chrc->path, CHRC_INTERFACE, name);

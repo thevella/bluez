@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -493,6 +480,7 @@ static void add_player(DBusConnection *conn, const char *name,
 	reply = dbus_connection_send_with_reply_and_block(sys, msg, -1, &err);
 	if (!reply) {
 		fprintf(stderr, "Can't register player\n");
+		dbus_connection_unregister_object_path(sys, path);
 		free(owner);
 		if (dbus_error_is_set(&err)) {
 			fprintf(stderr, "%s\n", err.message);
@@ -1991,7 +1979,7 @@ static void register_player(GDBusProxy *proxy)
 
 	player->conn = g_dbus_setup_private(DBUS_BUS_SESSION, player->bus_name,
 									NULL);
-	if (!session) {
+	if (!player->conn) {
 		fprintf(stderr, "Could not register bus name %s",
 							player->bus_name);
 		goto fail;

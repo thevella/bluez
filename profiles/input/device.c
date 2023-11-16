@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2014       Google Inc.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -33,6 +20,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/uio.h>
 
 #include "input_common.h"
 #include "lib/bluetooth.h"
@@ -50,6 +38,7 @@
 #include "src/dbus-common.h"
 #include "src/error.h"
 #include "src/sdp-client.h"
+#include "src/shared/timeout.h"
 #include "src/shared/uhid.h"
 
 #include "device.h"
@@ -58,6 +47,38 @@
 #include "device_local_channels.h"
 
 #define INPUT_INTERFACE "org.bluez.Input1"
+
+enum reconnect_mode_t {
+	RECONNECT_NONE = 0,
+	RECONNECT_DEVICE,
+	RECONNECT_HOST,
+	RECONNECT_ANY
+};
+
+struct input_device {
+	struct btd_service	*service;
+	struct btd_device	*device;
+	char			*path;
+	bdaddr_t		src;
+	bdaddr_t		dst;
+	const sdp_record_t	*rec;
+	GIOChannel		*ctrl_io;
+	GIOChannel		*intr_io;
+	guint			ctrl_watch;
+	guint			intr_watch;
+	guint			sec_watch;
+	struct hidp_connadd_req *req;
+	bool			disable_sdp;
+	enum reconnect_mode_t	reconnect_mode;
+	unsigned int		reconnect_timer;
+	uint32_t		reconnect_attempt;
+	struct bt_uhid		*uhid;
+	bool			uhid_created;
+	uint8_t			report_req_pending;
+	unsigned int		report_req_timer;
+	uint32_t		report_rsp_id;
+	bool			virtual_cable_unplug;
+};
 
 static int idle_timeout = 0;
 static bool uhid_enabled = false;
@@ -135,7 +156,7 @@ static void input_device_free(struct input_device *idev)
 	}
 
 	if (idev->reconnect_timer > 0)
-		g_source_remove(idev->reconnect_timer);
+		timeout_remove(idev->reconnect_timer);
 
 	if (idev->report_req_timer > 0)
 		g_source_remove(idev->report_req_timer);
@@ -162,32 +183,33 @@ bool hidp_send_message(GIOChannel *chan, uint8_t hdr,
 {
 	int fd;
 	ssize_t len;
-	uint8_t msg[size + 1];
+	struct iovec iov[2];
 
 	if (!chan) {
 		error("BT socket not connected");
 		return false;
 	}
 
+	iov[0].iov_base = &hdr;
+	iov[0].iov_len = sizeof(hdr);
+
 	if (data == NULL)
 		size = 0;
 
-	msg[0] = hdr;
-	if (size > 0)
-		memcpy(&msg[1], data, size);
-	++size;
+	iov[1].iov_base = (void *)data;
+	iov[1].iov_len = size;
 
 	fd = g_io_channel_unix_get_fd(chan);
 
-	len = write(fd, msg, size);
+	len = writev(fd, iov, 2);
 	if (len < 0) {
 		error("BT socket write error: %s (%d)", strerror(errno), errno);
 		return false;
 	}
 
-	if ((size_t) len < size) {
+	if ((size_t) len < size + 1) {
 		error("BT socket write error: partial write (%zd of %zu bytes)",
-								len, size);
+								len, size + 1);
 		return false;
 	}
 
@@ -445,7 +467,7 @@ static void hidp_recv_ctrl_handshake(struct input_device *idev, uint8_t param)
 	if (pending_req_complete) {
 		idev->report_req_pending = 0;
 		if (idev->report_req_timer > 0) {
-			g_source_remove(idev->report_req_timer);
+			timeout_remove(idev->report_req_timer);
 			idev->report_req_timer = 0;
 		}
 		idev->report_rsp_id = 0;
@@ -505,7 +527,7 @@ static void hidp_recv_ctrl_data(struct input_device *idev, uint8_t param,
 
 	idev->report_req_pending = 0;
 	if (idev->report_req_timer > 0) {
-		g_source_remove(idev->report_req_timer);
+		timeout_remove(idev->report_req_timer);
 		idev->report_req_timer = 0;
 	}
 	idev->report_rsp_id = 0;
@@ -591,6 +613,13 @@ static gboolean ctrl_watch_cb(GIOChannel *chan, GIOCondition cond, gpointer data
 	if (idev->intr_io && !(cond & G_IO_NVAL))
 		g_io_channel_shutdown(idev->intr_io, TRUE, NULL);
 
+	/* It's possible this is triggered while the intr channel is not even
+	 * connected yet, therefore we are still in the connecting state.
+	 */
+	if (btd_service_get_state(idev->service) ==
+						BTD_SERVICE_STATE_CONNECTING)
+		btd_service_connecting_complete(idev->service, -EIO);
+
 	if (!idev->intr_io && idev->virtual_cable_unplug)
 		virtual_cable_unplug(idev);
 
@@ -599,7 +628,7 @@ static gboolean ctrl_watch_cb(GIOChannel *chan, GIOCondition cond, gpointer data
 
 #define REPORT_REQ_TIMEOUT  3
 
-static gboolean hidp_report_req_timeout(gpointer data)
+static bool hidp_report_req_timeout(gpointer data)
 {
 	struct input_device *idev = data;
 	uint8_t pending_req_type;
@@ -680,8 +709,8 @@ static void hidp_send_set_report(struct uhid_event *ev, void *user_data)
 	if (sent) {
 		idev->report_req_pending = hdr;
 		idev->report_req_timer =
-			g_timeout_add_seconds(REPORT_REQ_TIMEOUT,
-					hidp_report_req_timeout, idev);
+			timeout_add_seconds(REPORT_REQ_TIMEOUT,
+					hidp_report_req_timeout, idev, NULL);
 		idev->report_rsp_id = ev->u.set_report.id;
 	} else
 		uhid_send_set_report_reply(idev, ev->u.set_report.id, EIO);
@@ -723,8 +752,9 @@ static void hidp_send_get_report(struct uhid_event *ev, void *user_data)
 	if (sent) {
 		idev->report_req_pending = hdr;
 		idev->report_req_timer =
-			g_timeout_add_seconds(REPORT_REQ_TIMEOUT,
-						hidp_report_req_timeout, idev);
+			timeout_add_seconds(REPORT_REQ_TIMEOUT,
+						hidp_report_req_timeout, idev,
+						NULL);
 		idev->report_rsp_id = ev->u.get_report.id;
 	} else
 		uhid_send_get_report_reply(idev, NULL, 0, ev->u.get_report.id,
@@ -756,7 +786,8 @@ static void epox_endian_quirk(unsigned char *data, int size)
 	}
 }
 
-static int create_hid_dev_name(sdp_record_t *rec, struct hidp_connadd_req *req)
+static int create_hid_dev_name(const sdp_record_t *rec,
+					struct hidp_connadd_req *req)
 {
 	char sdesc[sizeof(req->name) / 2];
 
@@ -778,7 +809,7 @@ static int create_hid_dev_name(sdp_record_t *rec, struct hidp_connadd_req *req)
 
 /* See HID profile specification v1.0, "7.11.6 HIDDescriptorList" for details
  * on the attribute format. */
-static int extract_hid_desc_data(sdp_record_t *rec,
+static int extract_hid_desc_data(const sdp_record_t *rec,
 						struct hidp_connadd_req *req)
 {
 	sdp_data_t *d;
@@ -819,36 +850,40 @@ invalid_desc:
 	return -EINVAL;
 }
 
-static int extract_hid_record(sdp_record_t *rec, struct hidp_connadd_req *req)
+static int extract_hid_record(struct input_device *idev,
+					struct hidp_connadd_req *req)
 {
 	sdp_data_t *pdlist;
 	uint8_t attr_val;
 	int err;
 
-	err = create_hid_dev_name(rec, req);
+	if (!idev->rec)
+		return -ENOENT;
+
+	err = create_hid_dev_name(idev->rec, req);
 	if (err < 0)
 		DBG("No valid Service Name or Service Description found");
 
-	pdlist = sdp_data_get(rec, SDP_ATTR_HID_PARSER_VERSION);
+	pdlist = sdp_data_get(idev->rec, SDP_ATTR_HID_PARSER_VERSION);
 	req->parser = pdlist ? pdlist->val.uint16 : 0x0100;
 
-	pdlist = sdp_data_get(rec, SDP_ATTR_HID_DEVICE_SUBCLASS);
+	pdlist = sdp_data_get(idev->rec, SDP_ATTR_HID_DEVICE_SUBCLASS);
 	req->subclass = pdlist ? pdlist->val.uint8 : 0;
 
-	pdlist = sdp_data_get(rec, SDP_ATTR_HID_COUNTRY_CODE);
+	pdlist = sdp_data_get(idev->rec, SDP_ATTR_HID_COUNTRY_CODE);
 	req->country = pdlist ? pdlist->val.uint8 : 0;
 
-	pdlist = sdp_data_get(rec, SDP_ATTR_HID_VIRTUAL_CABLE);
+	pdlist = sdp_data_get(idev->rec, SDP_ATTR_HID_VIRTUAL_CABLE);
 	attr_val = pdlist ? pdlist->val.uint8 : 0;
 	if (attr_val)
 		req->flags |= (1 << HIDP_VIRTUAL_CABLE_UNPLUG);
 
-	pdlist = sdp_data_get(rec, SDP_ATTR_HID_BOOT_DEVICE);
+	pdlist = sdp_data_get(idev->rec, SDP_ATTR_HID_BOOT_DEVICE);
 	attr_val = pdlist ? pdlist->val.uint8 : 0;
 	if (attr_val)
 		req->flags |= (1 << HIDP_BOOT_PROTOCOL_MODE);
 
-	err = extract_hid_desc_data(rec, req);
+	err = extract_hid_desc_data(idev->rec, req);
 	if (err < 0)
 		return err;
 
@@ -1039,11 +1074,6 @@ static gboolean encrypt_notify(GIOChannel *io, GIOCondition condition,
 static int hidp_add_connection(struct input_device *idev)
 {
 	struct hidp_connadd_req *req;
-	sdp_record_t *rec;
-	char src_addr[18], dst_addr[18];
-	char filename[PATH_MAX];
-	GKeyFile *key_file;
-	char handle[11], *str;
 	GError *gerr = NULL;
 	int err;
 
@@ -1053,29 +1083,7 @@ static int hidp_add_connection(struct input_device *idev)
 	req->flags     = 0;
 	req->idle_to   = idle_timeout;
 
-	ba2str(&idev->src, src_addr);
-	ba2str(&idev->dst, dst_addr);
-
-	snprintf(filename, PATH_MAX, STORAGEDIR "/%s/cache/%s", src_addr,
-								dst_addr);
-	sprintf(handle, "0x%8.8X", idev->handle);
-
-	key_file = g_key_file_new();
-	g_key_file_load_from_file(key_file, filename, 0, NULL);
-	str = g_key_file_get_string(key_file, "ServiceRecords", handle, NULL);
-	g_key_file_free(key_file);
-
-	if (!str) {
-		error("Rejected connection from unknown device %s", dst_addr);
-		err = -EPERM;
-		goto cleanup;
-	}
-
-	rec = record_from_string(str);
-	g_free(str);
-
-	err = extract_hid_record(rec, req);
-	sdp_record_free(rec);
+	err = extract_hid_record(idev, req);
 	if (err < 0) {
 		error("Could not parse HID SDP record: %s (%d)", strerror(-err),
 									-err);
@@ -1091,7 +1099,7 @@ static int hidp_add_connection(struct input_device *idev)
 
 	/* Make sure the device is bonded if required */
 	if (classic_bonded_only && !input_device_bonded(idev)) {
-		error("Rejected connection from !bonded device %s", dst_addr);
+		error("Rejected connection from !bonded device %s", idev->path);
 		goto cleanup;
 	}
 
@@ -1161,12 +1169,77 @@ static int connection_disconnect(struct input_device *idev, uint32_t flags)
 		return ioctl_disconnect(idev, flags);
 }
 
+static bool is_device_sdp_disable(const sdp_record_t *rec)
+{
+	sdp_data_t *data;
+
+	data = sdp_data_get(rec, SDP_ATTR_HID_SDP_DISABLE);
+
+	return data && data->val.uint8;
+}
+
+static enum reconnect_mode_t hid_reconnection_mode(bool reconnect_initiate,
+						bool normally_connectable)
+{
+	if (!reconnect_initiate && !normally_connectable)
+		return RECONNECT_NONE;
+	else if (!reconnect_initiate && normally_connectable)
+		return RECONNECT_HOST;
+	else if (reconnect_initiate && !normally_connectable)
+		return RECONNECT_DEVICE;
+	else /* (reconnect_initiate && normally_connectable) */
+		return RECONNECT_ANY;
+}
+
+static void extract_hid_props(struct input_device *idev,
+					const sdp_record_t *rec)
+{
+	/* Extract HID connectability */
+	bool reconnect_initiate, normally_connectable;
+	sdp_data_t *pdlist;
+
+	/* HIDNormallyConnectable is optional and assumed FALSE if not
+	 * present.
+	 */
+	pdlist = sdp_data_get(rec, SDP_ATTR_HID_RECONNECT_INITIATE);
+	reconnect_initiate = pdlist ? pdlist->val.uint8 : TRUE;
+
+	pdlist = sdp_data_get(rec, SDP_ATTR_HID_NORMALLY_CONNECTABLE);
+	normally_connectable = pdlist ? pdlist->val.uint8 : FALSE;
+
+	/* Update local values */
+	idev->reconnect_mode =
+		hid_reconnection_mode(reconnect_initiate, normally_connectable);
+}
+
+static void input_device_update_rec(struct input_device *idev)
+{
+	struct btd_profile *p = btd_service_get_profile(idev->service);
+	const sdp_record_t *rec;
+
+	rec = btd_device_get_record(idev->device, p->remote_uuid);
+	if (!rec || idev->rec == rec)
+		return;
+
+	idev->rec = rec;
+	idev->disable_sdp = is_device_sdp_disable(rec);
+
+	/* Initialize device properties */
+	extract_hid_props(idev, rec);
+
+	if (idev->disable_sdp)
+		device_set_refresh_discovery(idev->device, false);
+}
+
 static int input_device_connected(struct input_device *idev)
 {
 	int err;
 
 	if (idev->intr_io == NULL || idev->ctrl_io == NULL)
 		return -ENOTCONN;
+
+	/* Attempt to update SDP record if it had changed */
+	input_device_update_rec(idev);
 
 	err = hidp_add_connection(idev);
 	if (err < 0)
@@ -1295,7 +1368,7 @@ static int dev_connect(struct input_device *idev)
 	return -EIO;
 }
 
-static gboolean input_device_auto_reconnect(gpointer user_data)
+static bool input_device_auto_reconnect(gpointer user_data)
 {
 	struct input_device *idev = user_data;
 
@@ -1365,12 +1438,13 @@ static void input_device_enter_reconnect_mode(struct input_device *idev)
 		return;
 
 	if (idev->reconnect_timer > 0)
-		g_source_remove(idev->reconnect_timer);
+		timeout_remove(idev->reconnect_timer);
 
 	DBG("registering auto-reconnect");
 	idev->reconnect_attempt = 0;
-	idev->reconnect_timer = g_timeout_add_seconds(30,
-					input_device_auto_reconnect, idev);
+	idev->reconnect_timer = timeout_add_seconds(30,
+					input_device_auto_reconnect, idev,
+					NULL);
 
 }
 
@@ -1410,59 +1484,12 @@ int input_device_disconnect(struct btd_service *service)
 	return 0;
 }
 
-static bool is_device_sdp_disable(const sdp_record_t *rec)
-{
-	sdp_data_t *data;
-
-	data = sdp_data_get(rec, SDP_ATTR_HID_SDP_DISABLE);
-
-	return data && data->val.uint8;
-}
-
-static enum reconnect_mode_t hid_reconnection_mode(bool reconnect_initiate,
-						bool normally_connectable)
-{
-	if (!reconnect_initiate && !normally_connectable)
-		return RECONNECT_NONE;
-	else if (!reconnect_initiate && normally_connectable)
-		return RECONNECT_HOST;
-	else if (reconnect_initiate && !normally_connectable)
-		return RECONNECT_DEVICE;
-	else /* (reconnect_initiate && normally_connectable) */
-		return RECONNECT_ANY;
-}
-
-static void extract_hid_props(struct input_device *idev,
-					const sdp_record_t *rec)
-{
-	/* Extract HID connectability */
-	bool reconnect_initiate, normally_connectable;
-	sdp_data_t *pdlist;
-
-	/* HIDNormallyConnectable is optional and assumed FALSE
-	* if not present. */
-	pdlist = sdp_data_get(rec, SDP_ATTR_HID_RECONNECT_INITIATE);
-	reconnect_initiate = pdlist ? pdlist->val.uint8 : TRUE;
-
-	pdlist = sdp_data_get(rec, SDP_ATTR_HID_NORMALLY_CONNECTABLE);
-	normally_connectable = pdlist ? pdlist->val.uint8 : FALSE;
-
-	/* Update local values */
-	idev->reconnect_mode =
-		hid_reconnection_mode(reconnect_initiate, normally_connectable);
-}
-
 static struct input_device *input_device_new(struct btd_service *service)
 {
 	struct btd_device *device = btd_service_get_device(service);
-	struct btd_profile *p = btd_service_get_profile(service);
 	const char *path = device_get_path(device);
-	const sdp_record_t *rec = btd_device_get_record(device, p->remote_uuid);
 	struct btd_adapter *adapter = device_get_adapter(device);
 	struct input_device *idev;
-
-	if (!rec)
-		return NULL;
 
 	idev = g_new0(struct input_device, 1);
 	bacpy(&idev->src, btd_adapter_get_address(adapter));
@@ -1470,14 +1497,8 @@ static struct input_device *input_device_new(struct btd_service *service)
 	idev->service = btd_service_ref(service);
 	idev->device = btd_device_ref(device);
 	idev->path = g_strdup(path);
-	idev->handle = rec->handle;
-	idev->disable_sdp = is_device_sdp_disable(rec);
 
-	/* Initialize device properties */
-	extract_hid_props(idev, rec);
-
-	if (idev->disable_sdp)
-		device_set_refresh_discovery(device, false);
+	input_device_update_rec(idev);
 
 	return idev;
 }

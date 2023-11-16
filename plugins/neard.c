@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012-2013  Tieto Poland
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -42,7 +29,8 @@
 #include "src/device.h"
 #include "src/eir.h"
 #include "src/agent.h"
-#include "src/hcid.h"
+#include "src/btd.h"
+#include "src/shared/util.h"
 
 #define NEARD_NAME "org.neard"
 #define NEARD_PATH "/"
@@ -84,7 +72,7 @@ static void free_oob_params(struct oob_params *params)
 	g_free(params->name);
 	g_free(params->hash);
 	g_free(params->randomizer);
-	g_free(params->pin);
+	free(params->pin);
 }
 
 static DBusMessage *error_reply(DBusMessage *msg, int error)
@@ -233,9 +221,9 @@ static DBusMessage *create_request_oob_reply(struct btd_adapter *adapter,
 	len = eir_create_oob(btd_adapter_get_address(adapter),
 				btd_adapter_get_name(adapter),
 				btd_adapter_get_class(adapter), hash,
-				randomizer, main_opts.did_vendor,
-				main_opts.did_product, main_opts.did_version,
-				main_opts.did_source,
+				randomizer, btd_opts.did_vendor,
+				btd_opts.did_product, btd_opts.did_version,
+				btd_opts.did_source,
 				btd_adapter_get_services(adapter), eir);
 
 	reply = dbus_message_new_method_return(msg);
@@ -420,10 +408,10 @@ static int process_nokia_long (void *data, size_t size, uint8_t marker,
 		remote->name = g_strndup((char *)n->name, n->name_len);
 
 	if (marker == 0x01) {
-		remote->pin = g_memdup(n->authentication, 4);
+		remote->pin = util_memdup(n->authentication, 4);
 		remote->pin_len = 4;
 	} else if (marker == 0x02) {
-		remote->pin = g_memdup(n->authentication, 16);
+		remote->pin = util_memdup(n->authentication, 16);
 		remote->pin_len = 16;
 	}
 
@@ -452,7 +440,7 @@ static int process_nokia_short (void *data, size_t size,
 	if (n->name_len > 0)
 		remote->name = g_strndup((char *)n->name, n->name_len);
 
-	remote->pin = g_memdup(n->authentication, 4);
+	remote->pin = util_memdup(n->authentication, 4);
 	remote->pin_len = 4;
 
 	return 0;
@@ -587,14 +575,12 @@ static int process_message(DBusMessage *msg, struct oob_params *remote)
 			if (process_nokia_com_bt(data, size, remote))
 				goto error;
 		} else if (strcasecmp(key, "State") == 0) {
-			DBusMessageIter array;
 			const char *state;
 
 			if (dbus_message_iter_get_arg_type(&value) !=
 					DBUS_TYPE_STRING)
 				goto error;
 
-			dbus_message_iter_recurse(&value, &array);
 			dbus_message_iter_get_basic(&value, &state);
 
 			remote->power_state = process_state(state);

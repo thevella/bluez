@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2013-2014  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -39,6 +26,7 @@
 #include "lib/sdp_lib.h"
 #include "profiles/audio/a2dp-codecs.h"
 #include "src/shared/queue.h"
+#include "src/shared/util.h"
 #include "src/log.h"
 #include "hal-msg.h"
 #include "ipc-common.h"
@@ -441,7 +429,7 @@ static struct a2dp_preset *sbc_select_range(void *caps, uint8_t caps_len,
 
 	p = g_new0(struct a2dp_preset, 1);
 	p->len = conf_len;
-	p->data = g_memdup(conf, p->len);
+	p->data = util_memdup(conf, p->len);
 
 	return p;
 }
@@ -461,7 +449,7 @@ static struct a2dp_preset *aac_select_range(void *caps, uint8_t caps_len,
 
 	p = g_new0(struct a2dp_preset, 1);
 	p->len = conf_len;
-	p->data = g_memdup(conf, p->len);
+	p->data = util_memdup(conf, p->len);
 
 	return p;
 }
@@ -1049,7 +1037,7 @@ static gboolean sep_setconf_ind(struct avdtp *session,
 
 		preset = g_new0(struct a2dp_preset, 1);
 		preset->len = cap->length - sizeof(*codec);
-		preset->data = g_memdup(codec->data, preset->len);
+		preset->data = util_memdup(codec->data, preset->len);
 
 		if (check_config(endpoint, preset) < 0) {
 			preset_free(preset);
@@ -1378,7 +1366,7 @@ static GSList *parse_presets(const struct audio_preset *p, uint8_t count,
 
 		preset = g_new0(struct a2dp_preset, 1);
 		preset->len = p->len;
-		preset->data = g_memdup(p->data, preset->len);
+		preset->data = util_memdup(p->data, preset->len);
 		l = g_slist_append(l, preset);
 
 		len -= preset->len;
@@ -1705,7 +1693,7 @@ bool bt_a2dp_register(struct ipc *ipc, const bdaddr_t *addr, uint8_t mode)
 				BT_IO_OPT_SOURCE_BDADDR, &adapter_addr,
 				BT_IO_OPT_PSM, AVDTP_PSM,
 				BT_IO_OPT_SEC_LEVEL, BT_IO_SEC_MEDIUM,
-				BT_IO_OPT_MASTER, true,
+				BT_IO_OPT_CENTRAL, true,
 				BT_IO_OPT_INVALID);
 	if (!server) {
 		error("Failed to listen on AVDTP channel: %s", err->message);

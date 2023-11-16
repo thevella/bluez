@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2011  Intel Corporation.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -41,7 +28,7 @@
 #define SMP_CMD_PAIRING_RANDOM	0x04
 #define SMP_CMD_PAIRING_FAILED	0x05
 #define SMP_CMD_ENCRYPT_INFO	0x06
-#define SMP_CMD_MASTER_IDENT	0x07
+#define SMP_CMD_CENTRAL_IDENT	0x07
 #define SMP_CMD_IDENT_INFO	0X08
 #define SMP_CMD_IDENT_ADDR_INFO	0x09
 #define SMP_CMD_SIGN_INFO	0x0a
@@ -91,8 +78,8 @@ static const char *smpcmd2str(uint8_t cmd)
 		return "Pairing Failed";
 	case SMP_CMD_ENCRYPT_INFO:
 		return "Encryption Information";
-	case SMP_CMD_MASTER_IDENT:
-		return "Master Identification";
+	case SMP_CMD_CENTRAL_IDENT:
+		return "Central Identification";
 	case SMP_CMD_IDENT_INFO:
 		return "Identity Information";
 	case SMP_CMD_IDENT_ADDR_INFO:
@@ -234,7 +221,7 @@ static void smp_cmd_encrypt_info_dump(int level, struct frame *frm)
 	printf("\n");
 }
 
-static void smp_cmd_master_ident_dump(int level, struct frame *frm)
+static void smp_cmd_central_ident_dump(int level, struct frame *frm)
 {
 	uint16_t ediv = btohs(htons(p_get_u16(frm)));
 	int i;
@@ -316,8 +303,8 @@ void smp_dump(int level, struct frame *frm)
 	case SMP_CMD_ENCRYPT_INFO:
 		smp_cmd_encrypt_info_dump(level + 1, frm);
 		break;
-	case SMP_CMD_MASTER_IDENT:
-		smp_cmd_master_ident_dump(level + 1, frm);
+	case SMP_CMD_CENTRAL_IDENT:
+		smp_cmd_central_ident_dump(level + 1, frm);
 		break;
 	case SMP_CMD_IDENT_INFO:
 		smp_cmd_ident_info_dump(level + 1, frm);

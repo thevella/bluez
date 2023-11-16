@@ -1,18 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Google Inc.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  *
  */
 
@@ -293,9 +284,13 @@ static bool hr_msrmt_cb(void *user_data)
 	uint16_t len = 2;
 	uint8_t pdu[4];
 	uint32_t cur_ee;
+	uint32_t val;
+
+	if (util_getrandom(&val, sizeof(val), 0) < 0)
+		return false;
 
 	pdu[0] = 0x06;
-	pdu[1] = 90 + (rand() % 40);
+	pdu[1] = 90 + (val % 40);
 
 	if (expended_present) {
 		pdu[0] |= 0x08;
@@ -593,7 +588,8 @@ static struct server *server_create(int fd, uint16_t mtu, bool hr_visible)
 	server->hr_visible = hr_visible;
 
 	if (verbose) {
-		bt_att_set_debug(server->att, att_debug_cb, "att: ", NULL);
+		bt_att_set_debug(server->att, BT_ATT_DEBUG_VERBOSE,
+						att_debug_cb, "att: ", NULL);
 		bt_gatt_server_set_debug(server->gatt, gatt_debug_cb,
 							"server: ", NULL);
 	}
@@ -1084,12 +1080,15 @@ static void prompt_read_cb(int fd, uint32_t events, void *user_data)
 	}
 
 	read = getline(&line, &len, stdin);
-	if (read < 0)
+	if (read < 0) {
+		free(line);
 		return;
+	}
 
 	if (read <= 1) {
 		cmd_help(server, NULL);
 		print_prompt();
+		free(line);
 		return;
 	}
 

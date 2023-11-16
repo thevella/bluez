@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2019  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
  *
  */
 
@@ -35,42 +26,64 @@
 
 #include "mesh/mesh-defs.h"
 
+#include "mesh/dbus.h"
 #include "mesh/node.h"
 #include "mesh/keyring.h"
 
-const char *dev_key_dir = "/dev_keys";
-const char *app_key_dir = "/app_keys";
-const char *net_key_dir = "/net_keys";
+static const char *dev_key_dir = "/dev_keys";
+static const char *app_key_dir = "/app_keys";
+static const char *net_key_dir = "/net_keys";
+
+static int open_key_file(struct mesh_node *node, const char *key_dir,
+							uint16_t idx, int flags)
+{
+	const char *node_path;
+	char fname[PATH_MAX];
+	int ret;
+
+	if (!node)
+		return -1;
+
+	node_path = node_get_storage_dir(node);
+
+	if (flags & O_CREAT) {
+		ret = snprintf(fname, PATH_MAX, "%s%s", node_path, key_dir);
+		if (ret < 0)
+			return -1;
+
+		if (mkdir(fname, 0755) != 0 && errno != EEXIST)
+			l_error("Failed to create dir(%d): %s", errno, fname);
+	}
+
+	ret = snprintf(fname, PATH_MAX, "%s%s/%3.3x", node_path, key_dir, idx);
+	if (ret < 0)
+		return -1;
+
+	if (flags & O_CREAT)
+		return open(fname, flags, 0600);
+	else
+		return open(fname, flags);
+}
 
 bool keyring_put_net_key(struct mesh_node *node, uint16_t net_idx,
 						struct keyring_net_key *key)
 {
-	const char *node_path;
-	char key_file[PATH_MAX];
 	bool result = false;
 	int fd;
 
-	if (!node || !key)
+	if (!key)
 		return false;
 
-	node_path = node_get_storage_dir(node);
+	fd = open_key_file(node, net_key_dir, net_idx,
+					O_WRONLY | O_CREAT | O_TRUNC);
 
-	if (strlen(node_path) + strlen(net_key_dir) + 1 + 3 >= PATH_MAX)
+	if (fd < 0)
 		return false;
 
-	snprintf(key_file, PATH_MAX, "%s%s", node_path, net_key_dir);
-	mkdir(key_file, 0755);
-	snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, net_key_dir,
-								net_idx);
-	l_debug("Put Net Key %s", key_file);
+	if (write(fd, key, sizeof(*key)) == sizeof(*key))
+		result = true;
 
-	fd = open(key_file, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
-	if (fd >= 0) {
-		if (write(fd, key, sizeof(*key)) == sizeof(*key))
-			result = true;
-
-		close(fd);
-	}
+	close(fd);
 
 	return result;
 }
@@ -78,26 +91,14 @@ bool keyring_put_net_key(struct mesh_node *node, uint16_t net_idx,
 bool keyring_put_app_key(struct mesh_node *node, uint16_t app_idx,
 				uint16_t net_idx, struct keyring_app_key *key)
 {
-	const char *node_path;
-	char key_file[PATH_MAX];
 	bool result = false;
 	int fd;
 
-	if (!node || !key)
+	if (!key)
 		return false;
 
-	node_path = node_get_storage_dir(node);
+	fd = open_key_file(node, app_key_dir, app_idx, O_RDWR);
 
-	if (strlen(node_path) + strlen(app_key_dir) + 1 + 3 >= PATH_MAX)
-		return false;
-
-	snprintf(key_file, PATH_MAX, "%s%s", node_path, app_key_dir);
-	mkdir(key_file, 0755);
-	snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, app_key_dir,
-								app_idx);
-	l_debug("Put App Key %s", key_file);
-
-	fd = open(key_file, O_RDWR);
 	if (fd >= 0) {
 		struct keyring_app_key old_key;
 
@@ -110,15 +111,16 @@ bool keyring_put_app_key(struct mesh_node *node, uint16_t app_idx,
 
 		lseek(fd, 0, SEEK_SET);
 	} else
-		fd = open(key_file, O_WRONLY | O_CREAT | O_TRUNC,
-							S_IRUSR | S_IWUSR);
+		fd = open_key_file(node, app_key_dir, app_idx,
+						O_WRONLY | O_CREAT | O_TRUNC);
 
-	if (fd >= 0) {
-		if (write(fd, key, sizeof(*key)) == sizeof(*key))
-			result = true;
+	if (fd < 0)
+		return false;
 
-		close(fd);
-	}
+	if (write(fd, key, sizeof(*key)) == sizeof(*key))
+		result = true;
+
+	close(fd);
 
 	return result;
 }
@@ -153,7 +155,7 @@ bool keyring_finalize_app_keys(struct mesh_node *node, uint16_t net_idx)
 	const char *node_path;
 	char key_dir[PATH_MAX];
 	DIR *dir;
-	int dir_fd;
+	int ret, dir_fd;
 	struct dirent *entry;
 
 	if (!node)
@@ -161,10 +163,10 @@ bool keyring_finalize_app_keys(struct mesh_node *node, uint16_t net_idx)
 
 	node_path = node_get_storage_dir(node);
 
-	if (strlen(node_path) + strlen(app_key_dir) + 1 >= PATH_MAX)
+	ret = snprintf(key_dir, PATH_MAX, "%s%s", node_path, app_key_dir);
+	if (ret < 0)
 		return false;
 
-	snprintf(key_dir, PATH_MAX, "%s%s", node_path, app_key_dir);
 	dir = opendir(key_dir);
 	if (!dir) {
 		if (errno == ENOENT)
@@ -193,7 +195,7 @@ bool keyring_put_remote_dev_key(struct mesh_node *node, uint16_t unicast,
 	const char *node_path;
 	char key_file[PATH_MAX];
 	bool result = true;
-	int fd, i;
+	int ret, fd, i;
 
 	if (!IS_UNICAST_RANGE(unicast, count))
 		return false;
@@ -203,19 +205,22 @@ bool keyring_put_remote_dev_key(struct mesh_node *node, uint16_t unicast,
 
 	node_path = node_get_storage_dir(node);
 
-	if (strlen(node_path) + strlen(dev_key_dir) + 1 + 4 >= PATH_MAX)
+	ret = snprintf(key_file, PATH_MAX, "%s%s", node_path, dev_key_dir);
+	if (ret < 0)
 		return false;
 
-	snprintf(key_file, PATH_MAX, "%s%s", node_path, dev_key_dir);
-	mkdir(key_file, 0755);
+	if (mkdir(key_file, 0755) != 0 && errno != EEXIST)
+		l_error("Failed to create dir(%d): %s", errno, key_file);
 
 	for (i = 0; i < count; i++) {
-		snprintf(key_file, PATH_MAX, "%s%s/%4.4x", node_path,
+		ret = snprintf(key_file, PATH_MAX, "%s%s/%4.4x", node_path,
 						dev_key_dir, unicast + i);
+		if (ret < 0)
+			return false;
+
 		l_debug("Put Dev Key %s", key_file);
 
-		fd = open(key_file, O_WRONLY | O_CREAT | O_TRUNC,
-							S_IRUSR | S_IWUSR);
+		fd = open(key_file, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 		if (fd >= 0) {
 			if (write(fd, dev_key, 16) != 16)
 				result = false;
@@ -228,24 +233,19 @@ bool keyring_put_remote_dev_key(struct mesh_node *node, uint16_t unicast,
 	return result;
 }
 
-bool keyring_get_net_key(struct mesh_node *node, uint16_t net_idx,
-						struct keyring_net_key *key)
+static bool get_key(struct mesh_node *node, const char *key_dir,
+					uint16_t key_idx, void *key, ssize_t sz)
 {
-	const char *node_path;
-	char key_file[PATH_MAX];
 	bool result = false;
 	int fd;
 
-	if (!node || !key)
+	if (!key)
 		return false;
 
-	node_path = node_get_storage_dir(node);
-	snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, net_key_dir,
-								net_idx);
+	fd = open_key_file(node, key_dir, key_idx, O_RDONLY);
 
-	fd = open(key_file, O_RDONLY);
 	if (fd >= 0) {
-		if (read(fd, key, sizeof(*key)) == sizeof(*key))
+		if (read(fd, key, sz) == sz)
 			result = true;
 
 		close(fd);
@@ -254,30 +254,16 @@ bool keyring_get_net_key(struct mesh_node *node, uint16_t net_idx,
 	return result;
 }
 
+bool keyring_get_net_key(struct mesh_node *node, uint16_t net_idx,
+						struct keyring_net_key *key)
+{
+	return get_key(node, net_key_dir, net_idx, key, sizeof(*key));
+}
+
 bool keyring_get_app_key(struct mesh_node *node, uint16_t app_idx,
 						struct keyring_app_key *key)
 {
-	const char *node_path;
-	char key_file[PATH_MAX];
-	bool result = false;
-	int fd;
-
-	if (!node || !key)
-		return false;
-
-	node_path = node_get_storage_dir(node);
-	snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, app_key_dir,
-								app_idx);
-
-	fd = open(key_file, O_RDONLY);
-	if (fd >= 0) {
-		if (read(fd, key, sizeof(*key)) == sizeof(*key))
-			result = true;
-
-		close(fd);
-	}
-
-	return result;
+	return get_key(node, app_key_dir, app_idx, key, sizeof(*key));
 }
 
 bool keyring_get_remote_dev_key(struct mesh_node *node, uint16_t unicast,
@@ -286,7 +272,7 @@ bool keyring_get_remote_dev_key(struct mesh_node *node, uint16_t unicast,
 	const char *node_path;
 	char key_file[PATH_MAX];
 	bool result = false;
-	int fd;
+	int ret, fd;
 
 	if (!IS_UNICAST(unicast))
 		return false;
@@ -296,8 +282,10 @@ bool keyring_get_remote_dev_key(struct mesh_node *node, uint16_t unicast,
 
 	node_path = node_get_storage_dir(node);
 
-	snprintf(key_file, PATH_MAX, "%s%s/%4.4x", node_path, dev_key_dir,
+	ret = snprintf(key_file, PATH_MAX, "%s%s/%4.4x", node_path, dev_key_dir,
 								unicast);
+	if (ret < 0)
+		return false;
 
 	fd = open(key_file, O_RDONLY);
 	if (fd >= 0) {
@@ -314,13 +302,17 @@ bool keyring_del_net_key(struct mesh_node *node, uint16_t net_idx)
 {
 	const char *node_path;
 	char key_file[PATH_MAX];
+	int ret;
 
 	if (!node)
 		return false;
 
 	node_path = node_get_storage_dir(node);
-	snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, net_key_dir,
+	ret = snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, net_key_dir,
 								net_idx);
+	if (ret < 0)
+		return false;
+
 	l_debug("RM Net Key %s", key_file);
 	remove(key_file);
 
@@ -334,13 +326,17 @@ bool keyring_del_app_key(struct mesh_node *node, uint16_t app_idx)
 {
 	const char *node_path;
 	char key_file[PATH_MAX];
+	int ret;
 
 	if (!node)
 		return false;
 
 	node_path = node_get_storage_dir(node);
-	snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, app_key_dir,
+	ret = snprintf(key_file, PATH_MAX, "%s%s/%3.3x", node_path, app_key_dir,
 								app_idx);
+	if (ret < 0)
+		return false;
+
 	l_debug("RM App Key %s", key_file);
 	remove(key_file);
 
@@ -352,7 +348,7 @@ bool keyring_del_remote_dev_key(struct mesh_node *node, uint16_t unicast,
 {
 	const char *node_path;
 	char key_file[PATH_MAX];
-	int i;
+	int ret, i;
 
 	if (!IS_UNICAST_RANGE(unicast, count))
 		return false;
@@ -363,11 +359,318 @@ bool keyring_del_remote_dev_key(struct mesh_node *node, uint16_t unicast,
 	node_path = node_get_storage_dir(node);
 
 	for (i = 0; i < count; i++) {
-		snprintf(key_file, PATH_MAX, "%s%s/%4.4x", node_path,
+		ret = snprintf(key_file, PATH_MAX, "%s%s/%4.4x", node_path,
 						dev_key_dir, unicast + i);
+		if (ret < 0)
+			return false;
+
 		l_debug("RM Dev Key %s", key_file);
 		remove(key_file);
 	}
 
 	return true;
+}
+
+bool keyring_del_remote_dev_key_all(struct mesh_node *node, uint16_t unicast)
+{
+	uint8_t dev_key[16];
+	uint8_t test_key[16];
+	uint8_t cnt = 1;
+
+	if (!keyring_get_remote_dev_key(node, unicast, dev_key))
+		return false;
+
+	while (keyring_get_remote_dev_key(node, unicast + cnt, test_key)) {
+		if (memcmp(dev_key, test_key, sizeof(dev_key)))
+			break;
+
+		cnt++;
+	}
+
+	if (cnt > 1)
+		return keyring_del_remote_dev_key(node, unicast + 1, cnt - 1);
+
+	return true;
+}
+
+static DIR *open_key_dir(const char *node_path, const char *key_dir_name)
+{
+	char dir_path[PATH_MAX];
+	DIR *key_dir;
+	int ret;
+
+	ret = snprintf(dir_path, PATH_MAX, "%s%s", node_path, key_dir_name);
+	if (ret < 0)
+		return NULL;
+
+	key_dir = opendir(dir_path);
+	if (!key_dir)
+		l_error("Failed to open keyring storage directory: %s",
+								dir_path);
+
+	return key_dir;
+}
+
+static int open_key_dir_entry(int dir_fd, struct dirent *entry,
+							uint8_t fname_len)
+{
+	if (entry->d_type != DT_REG)
+		return -1;
+
+	/* Check the file name length */
+	if (strlen(entry->d_name) != fname_len)
+		return -1;
+
+	return openat(dir_fd, entry->d_name, O_RDONLY);
+}
+
+static void append_old_key(struct l_dbus_message_builder *builder,
+							const uint8_t key[16])
+{
+	l_dbus_message_builder_enter_dict(builder, "sv");
+	l_dbus_message_builder_append_basic(builder, 's', "OldKey");
+	l_dbus_message_builder_enter_variant(builder, "ay");
+	dbus_append_byte_array(builder, key, 16);
+	l_dbus_message_builder_leave_variant(builder);
+	l_dbus_message_builder_leave_dict(builder);
+}
+
+static void build_app_keys_reply(const char *node_path,
+					struct l_dbus_message_builder *builder,
+					uint16_t net_idx, uint8_t phase)
+{
+	DIR *key_dir;
+	int key_dir_fd;
+	struct dirent *entry;
+
+	key_dir = open_key_dir(node_path, app_key_dir);
+	if (!key_dir)
+		return;
+
+	key_dir_fd = dirfd(key_dir);
+
+	l_dbus_message_builder_enter_dict(builder, "sv");
+	l_dbus_message_builder_append_basic(builder, 's', "AppKeys");
+	l_dbus_message_builder_enter_variant(builder, "a(qaya{sv})");
+	l_dbus_message_builder_enter_array(builder, "(qaya{sv})");
+
+	while ((entry = readdir(key_dir)) != NULL) {
+		struct keyring_app_key key;
+		int fd = open_key_dir_entry(key_dir_fd, entry, 3);
+
+		if (fd < 0)
+			continue;
+
+		if (read(fd, &key, sizeof(key)) != sizeof(key) ||
+						key.net_idx != net_idx) {
+			close(fd);
+			continue;
+		}
+
+		close(fd);
+
+		l_dbus_message_builder_enter_struct(builder, "qaya{sv}");
+
+		l_dbus_message_builder_append_basic(builder, 'q', &key.app_idx);
+		dbus_append_byte_array(builder, key.new_key, 16);
+
+		l_dbus_message_builder_enter_array(builder, "{sv}");
+
+		if (phase != KEY_REFRESH_PHASE_NONE)
+			append_old_key(builder, key.old_key);
+
+		l_dbus_message_builder_leave_array(builder);
+		l_dbus_message_builder_leave_struct(builder);
+	}
+
+	l_dbus_message_builder_leave_array(builder);
+	l_dbus_message_builder_leave_variant(builder);
+	l_dbus_message_builder_leave_dict(builder);
+
+	closedir(key_dir);
+}
+
+static bool build_net_keys_reply(const char *node_path,
+					struct l_dbus_message_builder *builder)
+{
+	DIR *key_dir;
+	int key_dir_fd;
+	struct dirent *entry;
+	bool result = false;
+
+	key_dir = open_key_dir(node_path, net_key_dir);
+	if (!key_dir)
+		return false;
+
+	key_dir_fd = dirfd(key_dir);
+
+	l_dbus_message_builder_enter_dict(builder, "sv");
+	l_dbus_message_builder_append_basic(builder, 's', "NetKeys");
+	l_dbus_message_builder_enter_variant(builder, "a(qaya{sv})");
+	l_dbus_message_builder_enter_array(builder, "(qaya{sv})");
+
+	while ((entry = readdir(key_dir)) != NULL) {
+		struct keyring_net_key key;
+		int fd = open_key_dir_entry(key_dir_fd, entry, 3);
+
+		if (fd < 0)
+			continue;
+
+		if (read(fd, &key, sizeof(key)) != sizeof(key)) {
+			close(fd);
+			goto done;
+		}
+
+		close(fd);
+
+		/*
+		 * If network key is stuck in phase 3, keyring
+		 * write failed and this key info is unreliable.
+		 */
+		if (key.phase == KEY_REFRESH_PHASE_THREE)
+			continue;
+
+		l_dbus_message_builder_enter_struct(builder, "qaya{sv}");
+
+		l_dbus_message_builder_append_basic(builder, 'q', &key.net_idx);
+		dbus_append_byte_array(builder, key.new_key, 16);
+
+		l_dbus_message_builder_enter_array(builder, "{sv}");
+
+		if (key.phase != KEY_REFRESH_PHASE_NONE) {
+			dbus_append_dict_entry_basic(builder, "Phase", "y",
+								&key.phase);
+			append_old_key(builder, key.old_key);
+		}
+
+		build_app_keys_reply(node_path, builder, key.net_idx,
+								key.phase);
+
+		l_dbus_message_builder_leave_array(builder);
+		l_dbus_message_builder_leave_struct(builder);
+	}
+
+	l_dbus_message_builder_leave_array(builder);
+	l_dbus_message_builder_leave_variant(builder);
+	l_dbus_message_builder_leave_dict(builder);
+
+	result = true;
+done:
+	closedir(key_dir);
+
+	return result;
+
+}
+
+struct dev_key_entry {
+	uint16_t unicast;
+	uint8_t value[16];
+};
+
+static bool match_key_value(const void *a, const void *b)
+{
+	const struct dev_key_entry *key = a;
+	const uint8_t *value = b;
+
+	return (memcmp(key->value, value, 16) == 0);
+}
+
+static void build_dev_key_entry(void *a, void *b)
+{
+	struct dev_key_entry *key = a;
+	struct l_dbus_message_builder *builder = b;
+
+	l_dbus_message_builder_enter_struct(builder, "qay");
+	l_dbus_message_builder_append_basic(builder, 'q', &key->unicast);
+	dbus_append_byte_array(builder, key->value, 16);
+	l_dbus_message_builder_leave_struct(builder);
+}
+
+static bool build_dev_keys_reply(const char *node_path,
+					struct l_dbus_message_builder *builder)
+{
+	DIR *key_dir;
+	int key_dir_fd;
+	struct dirent *entry;
+	struct l_queue *keys;
+	bool result = false;
+
+	key_dir = open_key_dir(node_path, dev_key_dir);
+	/*
+	 * There is always at least one device key present for a local node.
+	 * Therefore, return false, if the directory does not exist.
+	 */
+	if (!key_dir)
+		return false;
+
+	key_dir_fd = dirfd(key_dir);
+
+	keys = l_queue_new();
+
+	while ((entry = readdir(key_dir)) != NULL) {
+		uint8_t buf[16];
+		uint16_t unicast;
+		struct dev_key_entry *key;
+		int fd = open_key_dir_entry(key_dir_fd, entry, 4);
+
+		if (fd < 0)
+			continue;
+
+		if (read(fd, buf, 16) != 16) {
+			close(fd);
+			goto done;
+		}
+
+		close(fd);
+
+		if (sscanf(entry->d_name, "%04hx", &unicast) != 1)
+			goto done;
+
+		key = l_queue_find(keys, match_key_value, buf);
+
+		if (key) {
+			if (key->unicast > unicast)
+				key->unicast = unicast;
+			continue;
+		}
+
+		key = l_new(struct dev_key_entry, 1);
+		key->unicast = unicast;
+		memcpy(key->value, buf, 16);
+		l_queue_push_tail(keys, key);
+	}
+
+	l_dbus_message_builder_enter_dict(builder, "sv");
+	l_dbus_message_builder_append_basic(builder, 's', "DevKeys");
+	l_dbus_message_builder_enter_variant(builder, "a(qay)");
+	l_dbus_message_builder_enter_array(builder, "(qay)");
+
+	l_queue_foreach(keys, build_dev_key_entry, builder);
+
+	l_dbus_message_builder_leave_array(builder);
+	l_dbus_message_builder_leave_variant(builder);
+	l_dbus_message_builder_leave_dict(builder);
+
+	result = true;
+done:
+	l_queue_destroy(keys, l_free);
+	closedir(key_dir);
+
+	return result;
+}
+
+bool keyring_build_export_keys_reply(struct mesh_node *node,
+					struct l_dbus_message_builder *builder)
+{
+	const char *node_path;
+
+	if (!node)
+		return false;
+
+	node_path = node_get_storage_dir(node);
+
+	if (!build_net_keys_reply(node_path, builder))
+		return false;
+
+	return build_dev_keys_reply(node_path, builder);
 }

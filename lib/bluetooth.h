@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,21 +6,8 @@
  *  Copyright (C) 2000-2001  Qualcomm Incorporated
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright 2023 NXP
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -50,6 +38,7 @@ extern "C" {
 #define BTPROTO_CMTP	5
 #define BTPROTO_HIDP	6
 #define BTPROTO_AVDTP	7
+#define BTPROTO_ISO	8
 
 #define SOL_HCI		0
 #define SOL_L2CAP	6
@@ -149,6 +138,90 @@ struct bt_voice {
 #define BT_MODE_LE_FLOWCTL	0x03
 #define BT_MODE_EXT_FLOWCTL	0x04
 
+#define BT_PKT_STATUS		16
+
+#define BT_SCM_PKT_STATUS	0x03
+
+#define BT_ISO_QOS		17
+
+#define BT_ISO_QOS_CIG_UNSET	0xff
+#define BT_ISO_QOS_CIS_UNSET	0xff
+
+#define BT_ISO_QOS_BIG_UNSET	0xff
+#define BT_ISO_QOS_BIS_UNSET	0xff
+
+#define BT_ISO_QOS_GROUP_UNSET	0xff
+#define BT_ISO_QOS_STREAM_UNSET	0xff
+
+struct bt_iso_io_qos {
+	uint32_t interval;
+	uint16_t latency;
+	uint16_t sdu;
+	uint8_t  phy;
+	uint8_t  rtn;
+};
+
+struct bt_iso_ucast_qos {
+	uint8_t  cig;
+	uint8_t  cis;
+	uint8_t  sca;
+	uint8_t  packing;
+	uint8_t  framing;
+	struct bt_iso_io_qos in;
+	struct bt_iso_io_qos out;
+};
+
+struct bt_iso_bcast_qos {
+	uint8_t  big;
+	uint8_t  bis;
+	uint8_t  sync_factor;
+	uint8_t  packing;
+	uint8_t  framing;
+	struct bt_iso_io_qos in;
+	struct bt_iso_io_qos out;
+	uint8_t  encryption;
+	uint8_t  bcode[16];
+	uint8_t  options;
+	uint16_t skip;
+	uint16_t sync_timeout;
+	uint8_t  sync_cte_type;
+	uint8_t  mse;
+	uint16_t timeout;
+};
+
+/* (HCI_MAX_PER_AD_LENGTH - EIR_SERVICE_DATA_LENGTH) */
+#define BASE_MAX_LENGTH 248
+struct bt_iso_base {
+	uint8_t base_len;
+	uint8_t base[BASE_MAX_LENGTH];
+};
+
+struct bt_iso_qos {
+	union {
+		struct bt_iso_ucast_qos ucast;
+		struct bt_iso_bcast_qos bcast;
+	};
+};
+
+#define BT_CODEC		19
+struct bt_codec {
+	uint8_t id;
+	uint16_t cid;
+	uint16_t vid;
+	uint8_t data_path_id;
+	uint8_t num_caps;
+	struct codec_caps {
+		uint8_t len;
+		uint8_t data[];
+	} caps[];
+} __attribute__((packed));
+
+struct bt_codecs {
+	uint8_t num_codecs;
+	struct bt_codec codecs[];
+} __attribute__((packed));
+
+
 /* Connection and socket states */
 enum {
 	BT_CONNECTED = 1, /* Equal to TCP_ESTABLISHED to make net code happy */
@@ -161,6 +234,8 @@ enum {
 	BT_DISCONN,
 	BT_CLOSED
 };
+
+#define BT_ISO_BASE		20
 
 /* Byte order conversions */
 #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -362,10 +437,15 @@ int basprintf(char *str, const char *format, ...);
 int basnprintf(char *str, size_t size, const char *format, ...);
 
 void *bt_malloc(size_t size);
+void *bt_malloc0(size_t size);
 void bt_free(void *ptr);
 
 int bt_error(uint16_t code);
 const char *bt_compidtostr(int id);
+
+typedef struct {
+	uint8_t data[3];
+} uint24_t;
 
 typedef struct {
 	uint8_t data[16];

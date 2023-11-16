@@ -1,23 +1,10 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2015  Google Inc.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -45,7 +32,7 @@
 #define BT_AD_DEVICE_ID			0x10
 #define BT_AD_SMP_TK			0x10
 #define BT_AD_SMP_OOB_FLAGS		0x11
-#define BT_AD_SLAVE_CONN_INTERVAL	0x12
+#define BT_AD_PERIPHERAL_CONN_INTERVAL	0x12
 #define BT_AD_SOLICIT16			0x14
 #define BT_AD_SOLICIT128		0x15
 #define BT_AD_SERVICE_DATA16		0x16
@@ -70,6 +57,7 @@
 #define BT_AD_MESH_PROV			0x29
 #define BT_AD_MESH_DATA			0x2a
 #define BT_AD_MESH_BEACON		0x2b
+#define BT_AD_CSIP_RSI			0x2e
 #define BT_AD_3D_INFO_DATA		0x3d
 #define BT_AD_MANUFACTURER_DATA		0xff
 
@@ -81,6 +69,7 @@
 typedef void (*bt_ad_func_t)(void *data, void *user_data);
 
 struct bt_ad;
+struct queue;
 
 struct bt_ad_manufacturer_data {
 	uint16_t manufacturer_id;
@@ -100,7 +89,18 @@ struct bt_ad_data {
 	size_t len;
 };
 
+struct bt_ad_pattern {
+	uint8_t type;
+	uint8_t offset;
+	uint8_t len;
+	uint8_t data[BT_AD_MAX_DATA_LEN];
+};
+
 struct bt_ad *bt_ad_new(void);
+
+bool bt_ad_set_max_len(struct bt_ad *ad, uint8_t len);
+
+struct bt_ad *bt_ad_new_with_data(size_t len, const uint8_t *data);
 
 struct bt_ad *bt_ad_ref(struct bt_ad *ad);
 
@@ -108,13 +108,17 @@ void bt_ad_unref(struct bt_ad *ad);
 
 uint8_t *bt_ad_generate(struct bt_ad *ad, size_t *length);
 
+bool bt_ad_is_empty(struct bt_ad *ad);
+
 bool bt_ad_add_service_uuid(struct bt_ad *ad, const bt_uuid_t *uuid);
+
+bool bt_ad_has_service_uuid(struct bt_ad *ad, const bt_uuid_t *uuid);
 
 bool bt_ad_remove_service_uuid(struct bt_ad *ad, bt_uuid_t *uuid);
 
 void bt_ad_clear_service_uuid(struct bt_ad *ad);
 
-bool bt_ad_add_manufacturer_data(struct bt_ad *ad, uint16_t manufacturer_data,
+bool bt_ad_add_manufacturer_data(struct bt_ad *ad, uint16_t id,
 						void *data, size_t len);
 
 bool bt_ad_has_manufacturer_data(struct bt_ad *ad,
@@ -148,6 +152,8 @@ void bt_ad_clear_service_data(struct bt_ad *ad);
 
 bool bt_ad_add_name(struct bt_ad *ad, const char *name);
 
+const char *bt_ad_get_name(struct bt_ad *ad);
+
 void bt_ad_clear_name(struct bt_ad *ad);
 
 bool bt_ad_add_appearance(struct bt_ad *ad, uint16_t appearance);
@@ -157,6 +163,8 @@ void bt_ad_clear_appearance(struct bt_ad *ad);
 bool bt_ad_add_flags(struct bt_ad *ad, uint8_t *flags, size_t len);
 
 bool bt_ad_has_flags(struct bt_ad *ad);
+
+uint8_t bt_ad_get_flags(struct bt_ad *ad);
 
 void bt_ad_clear_flags(struct bt_ad *ad);
 
@@ -169,3 +177,11 @@ void bt_ad_foreach_data(struct bt_ad *ad, bt_ad_func_t func, void *user_data);
 bool bt_ad_remove_data(struct bt_ad *ad, uint8_t type);
 
 void bt_ad_clear_data(struct bt_ad *ad);
+
+int8_t bt_ad_get_tx_power(struct bt_ad *ad);
+
+struct bt_ad_pattern *bt_ad_pattern_new(uint8_t type, size_t offset,
+					size_t len, const uint8_t *data);
+
+struct bt_ad_pattern *bt_ad_pattern_match(struct bt_ad *ad,
+							struct queue *patterns);

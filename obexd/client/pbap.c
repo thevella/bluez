@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  OBEX Client
@@ -5,20 +6,6 @@
  *  Copyright (C) 2007-2010  Intel Corporation
  *  Copyright (C) 2007-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -298,7 +285,7 @@ static void read_version(struct pbap_data *pbap, GObexApparam *apparam)
 		data = value;
 	}
 
-	if (memcmp(pbap->primary, data, len)) {
+	if (len == sizeof(pbap->primary) && memcmp(pbap->primary, data, len)) {
 		memcpy(pbap->primary, data, len);
 		g_dbus_emit_property_changed(conn,
 					obc_session_get_path(pbap->session),
@@ -312,7 +299,8 @@ static void read_version(struct pbap_data *pbap, GObexApparam *apparam)
 		data = value;
 	}
 
-	if (memcmp(pbap->secondary, data, len)) {
+	if (len == sizeof(pbap->secondary) &&
+			memcmp(pbap->secondary, data, len)) {
 		memcpy(pbap->secondary, data, len);
 		g_dbus_emit_property_changed(conn,
 					obc_session_get_path(pbap->session),
@@ -938,10 +926,11 @@ static DBusMessage *pbap_search(DBusConnection *connection,
 		return g_dbus_create_error(message,
 				ERROR_INTERFACE ".InvalidArguments", NULL);
 
-	if (dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_STRING)
+	if (dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_STRING) {
+		g_obex_apparam_free(apparam);
 		return g_dbus_create_error(message,
 				ERROR_INTERFACE ".InvalidArguments", NULL);
-
+	}
 	dbus_message_iter_get_basic(&args, &value);
 	dbus_message_iter_next(&args);
 

@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -7,20 +8,6 @@
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2002-2003  Stephen Crane <steve.crane@rococosoft.com>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -154,7 +141,8 @@ int sdp_general_inquiry(inquiry_info *ii, int dev_num, int duration, uint8_t *fo
 
 /* flexible extraction of basic attributes - Jean II */
 int sdp_get_int_attr(const sdp_record_t *rec, uint16_t attr, int *value);
-int sdp_get_string_attr(const sdp_record_t *rec, uint16_t attr, char *value, int valuelen);
+int sdp_get_string_attr(const sdp_record_t *rec, uint16_t attr, char *value,
+							size_t valuelen);
 
 /*
  * Basic sdp data functions
@@ -556,32 +544,38 @@ int sdp_get_service_avail(const sdp_record_t *rec, uint8_t *svcAvail);
 int sdp_get_service_ttl(const sdp_record_t *rec, uint32_t *svcTTLInfo);
 int sdp_get_database_state(const sdp_record_t *rec, uint32_t *svcDBState);
 
-static inline int sdp_get_service_name(const sdp_record_t *rec, char *str, int len)
+static inline int sdp_get_service_name(const sdp_record_t *rec, char *str,
+								size_t len)
 {
 	return sdp_get_string_attr(rec, SDP_ATTR_SVCNAME_PRIMARY, str, len);
 }
 
-static inline int sdp_get_service_desc(const sdp_record_t *rec, char *str, int len)
+static inline int sdp_get_service_desc(const sdp_record_t *rec, char *str,
+								size_t len)
 {
 	return sdp_get_string_attr(rec, SDP_ATTR_SVCDESC_PRIMARY, str, len);
 }
 
-static inline int sdp_get_provider_name(const sdp_record_t *rec, char *str, int len)
+static inline int sdp_get_provider_name(const sdp_record_t *rec, char *str,
+								size_t len)
 {
 	return sdp_get_string_attr(rec, SDP_ATTR_PROVNAME_PRIMARY, str, len);
 }
 
-static inline int sdp_get_doc_url(const sdp_record_t *rec, char *str, int len)
+static inline int sdp_get_doc_url(const sdp_record_t *rec, char *str,
+								size_t len)
 {
 	return sdp_get_string_attr(rec, SDP_ATTR_DOC_URL, str, len);
 }
 
-static inline int sdp_get_clnt_exec_url(const sdp_record_t *rec, char *str, int len)
+static inline int sdp_get_clnt_exec_url(const sdp_record_t *rec, char *str,
+								size_t len)
 {
 	return sdp_get_string_attr(rec, SDP_ATTR_CLNT_EXEC_URL, str, len);
 }
 
-static inline int sdp_get_icon_url(const sdp_record_t *rec, char *str, int len)
+static inline int sdp_get_icon_url(const sdp_record_t *rec, char *str,
+								size_t len)
 {
 	return sdp_get_string_attr(rec, SDP_ATTR_ICON_URL, str, len);
 }

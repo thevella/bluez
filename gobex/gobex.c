@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  OBEX library with GLib integration
  *
  *  Copyright (C) 2011  Intel Corporation. All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -432,6 +419,8 @@ static gboolean write_data(GIOChannel *io, GIOCondition cond,
 							gpointer user_data)
 {
 	GObex *obex = user_data;
+	struct pending_pkt *p = NULL;
+	GError *err = NULL;
 
 	if (cond & G_IO_NVAL)
 		return FALSE;
@@ -440,9 +429,9 @@ static gboolean write_data(GIOChannel *io, GIOCondition cond,
 		goto stop_tx;
 
 	if (obex->tx_data == 0) {
-		struct pending_pkt *p = g_queue_pop_head(obex->tx_queue);
 		ssize_t len;
 
+		p = g_queue_pop_head(obex->tx_queue);
 		if (p == NULL)
 			goto stop_tx;
 
@@ -482,6 +471,8 @@ encode:
 				check_srm_final(obex,
 						obex->tx_buf[0] & ~FINAL_BIT);
 			pending_pkt_free(p);
+			/* g_free() doesn't set the pointer to NULL */
+			p = NULL;
 		}
 
 		obex->tx_data = len;
@@ -493,8 +484,19 @@ encode:
 		return FALSE;
 	}
 
-	if (!obex->write(obex, NULL))
+	if (!obex->write(obex, &err)) {
+		g_obex_debug(G_OBEX_DEBUG_ERROR, "%s", err->message);
+
+		if (p) {
+			if (p->rsp_func)
+				p->rsp_func(obex, err, NULL, p->rsp_data);
+
+			pending_pkt_free(p);
+		}
+
+		g_error_free(err);
 		goto stop_tx;
+	}
 
 done:
 	if (obex->tx_data > 0 || g_queue_get_length(obex->tx_queue) > 0)

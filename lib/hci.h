@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -6,20 +7,6 @@
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -34,10 +21,11 @@ extern "C" {
 
 #define HCI_MAX_DEV	16
 
-#define HCI_MAX_ACL_SIZE	(1492 + 4)
+#define HCI_MAX_AMP_SIZE	(1492 + 4)
+#define HCI_MAX_ACL_SIZE	1024
 #define HCI_MAX_SCO_SIZE	255
 #define HCI_MAX_EVENT_SIZE	260
-#define HCI_MAX_FRAME_SIZE	(HCI_MAX_ACL_SIZE + 4)
+#define HCI_MAX_FRAME_SIZE	(HCI_MAX_AMP_SIZE + 4)
 
 /* HCI dev events */
 #define HCI_DEV_REG	1
@@ -120,6 +108,7 @@ enum {
 #define HCI_ACLDATA_PKT		0x02
 #define HCI_SCODATA_PKT		0x03
 #define HCI_EVENT_PKT		0x04
+#define HCI_ISODATA_PKT		0x05
 #define HCI_VENDOR_PKT		0xff
 
 /* HCI Packet types */
@@ -741,7 +730,7 @@ typedef struct {
 typedef struct {
 	uint8_t		flt_type;
 	uint8_t		cond_type;
-	uint8_t		condition[0];
+	uint8_t		condition[];
 } __attribute__ ((packed)) set_event_flt_cp;
 #define SET_EVENT_FLT_CP_SIZE 2
 
@@ -2147,7 +2136,7 @@ typedef struct {
 #define EVT_LE_META_EVENT	0x3E
 typedef struct {
 	uint8_t		subevent;
-	uint8_t		data[0];
+	uint8_t		data[];
 } __attribute__ ((packed)) evt_le_meta_event;
 #define EVT_LE_META_EVENT_SIZE 1
 
@@ -2171,7 +2160,7 @@ typedef struct {
 	uint8_t		bdaddr_type;
 	bdaddr_t	bdaddr;
 	uint8_t		length;
-	uint8_t		data[0];
+	uint8_t		data[];
 } __attribute__ ((packed)) le_advertising_info;
 #define LE_ADVERTISING_INFO_SIZE 9
 
@@ -2258,7 +2247,7 @@ typedef struct {
 typedef struct {
 	uint16_t		total_num_blocks;
 	uint8_t			num_handles;
-	cmplt_handle		handles[0];
+	cmplt_handle		handles[];
 }  __attribute__ ((packed)) evt_num_completed_blocks;
 
 #define EVT_AMP_STATUS_CHANGE			0x4D
@@ -2276,7 +2265,7 @@ typedef struct {
 #define EVT_STACK_INTERNAL		0xFD
 typedef struct {
 	uint16_t	type;
-	uint8_t		data[0];
+	uint8_t		data[];
 } __attribute__ ((packed)) evt_stack_internal;
 #define EVT_STACK_INTERNAL_SIZE 2
 
@@ -2419,19 +2408,19 @@ struct hci_dev_req {
 
 struct hci_dev_list_req {
 	uint16_t dev_num;
-	struct hci_dev_req dev_req[0];	/* hci_dev_req structures */
+	struct hci_dev_req dev_req[];	/* hci_dev_req structures */
 };
 
 struct hci_conn_list_req {
 	uint16_t dev_id;
 	uint16_t conn_num;
-	struct hci_conn_info conn_info[0];
+	struct hci_conn_info conn_info[];
 };
 
 struct hci_conn_info_req {
 	bdaddr_t bdaddr;
 	uint8_t  type;
-	struct hci_conn_info conn_info[0];
+	struct hci_conn_info conn_info[];
 };
 
 struct hci_auth_info_req {

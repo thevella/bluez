@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -7,26 +8,14 @@
  *  Copyright (C) 2007-2008  Fabien Chevalier <fabchevalier@free.fr>
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
 
+#include <errno.h>
+#include <stdio.h>
 #include "gdbus/gdbus.h"
 
 #include "error.h"
@@ -79,10 +68,22 @@ DBusMessage *btd_error_in_progress(DBusMessage *msg)
 					"In Progress");
 }
 
+DBusMessage *btd_error_in_progress_str(DBusMessage *msg, const char *str)
+{
+	return g_dbus_create_error(msg, ERROR_INTERFACE ".InProgress",
+					"%s", str);
+}
+
 DBusMessage *btd_error_not_available(DBusMessage *msg)
 {
 	return g_dbus_create_error(msg, ERROR_INTERFACE ".NotAvailable",
 					"Operation currently not available");
+}
+
+DBusMessage *btd_error_not_available_str(DBusMessage *msg, const char *str)
+{
+	return g_dbus_create_error(msg, ERROR_INTERFACE ".NotAvailable",
+					"%s", str);
 }
 
 DBusMessage *btd_error_does_not_exist(DBusMessage *msg)
@@ -121,8 +122,98 @@ DBusMessage *btd_error_not_ready(DBusMessage *msg)
 					"Resource Not Ready");
 }
 
+DBusMessage *btd_error_not_ready_str(DBusMessage *msg, const char *str)
+{
+	return g_dbus_create_error(msg, ERROR_INTERFACE ".NotReady",
+					"%s", str);
+}
+
 DBusMessage *btd_error_failed(DBusMessage *msg, const char *str)
 {
 	return g_dbus_create_error(msg, ERROR_INTERFACE
 					".Failed", "%s", str);
+}
+
+const char *btd_error_bredr_conn_from_errno(int errno_code)
+{
+	switch (-errno_code) {
+	case EALREADY:
+	case EISCONN:
+		return ERR_BREDR_CONN_ALREADY_CONNECTED;
+	case EHOSTDOWN:
+		return ERR_BREDR_CONN_PAGE_TIMEOUT;
+	case ENOPROTOOPT:
+		return ERR_BREDR_CONN_PROFILE_UNAVAILABLE;
+	case EIO:
+		return ERR_BREDR_CONN_CREATE_SOCKET;
+	case EINVAL:
+		return ERR_BREDR_CONN_INVALID_ARGUMENTS;
+	case EHOSTUNREACH:
+		return ERR_BREDR_CONN_ADAPTER_NOT_POWERED;
+	case EOPNOTSUPP:
+	case EPROTONOSUPPORT:
+		return ERR_BREDR_CONN_NOT_SUPPORTED;
+	case EBADFD:
+		return ERR_BREDR_CONN_BAD_SOCKET;
+	case ENOMEM:
+		return ERR_BREDR_CONN_MEMORY_ALLOC;
+	case EBUSY:
+		return ERR_BREDR_CONN_BUSY;
+	case EMLINK:
+		return ERR_BREDR_CONN_CNCR_CONNECT_LIMIT;
+	case ETIMEDOUT:
+		return ERR_BREDR_CONN_TIMEOUT;
+	case ECONNREFUSED:
+		return ERR_BREDR_CONN_REFUSED;
+	case ECONNRESET:
+		return ERR_BREDR_CONN_ABORT_BY_REMOTE;
+	case ECONNABORTED:
+		return ERR_BREDR_CONN_ABORT_BY_LOCAL;
+	case EPROTO:
+		return ERR_BREDR_CONN_LMP_PROTO_ERROR;
+	case EBADE:
+		return ERR_BREDR_CONN_KEY_MISSING;
+	default:
+		return ERR_BREDR_CONN_UNKNOWN;
+	}
+}
+
+const char *btd_error_le_conn_from_errno(int errno_code)
+{
+	switch (-errno_code) {
+	case EINVAL:
+		return ERR_LE_CONN_INVALID_ARGUMENTS;
+	case EHOSTUNREACH:
+		return ERR_LE_CONN_ADAPTER_NOT_POWERED;
+	case EOPNOTSUPP:
+	case EPROTONOSUPPORT:
+		return ERR_LE_CONN_NOT_SUPPORTED;
+	case EALREADY:
+	case EISCONN:
+		return ERR_LE_CONN_ALREADY_CONNECTED;
+	case EBADFD:
+		return ERR_LE_CONN_BAD_SOCKET;
+	case ENOMEM:
+		return ERR_LE_CONN_MEMORY_ALLOC;
+	case EBUSY:
+		return ERR_LE_CONN_BUSY;
+	case ECONNREFUSED:
+		return ERR_LE_CONN_REFUSED;
+	case EIO:
+		return ERR_LE_CONN_CREATE_SOCKET;
+	case ETIMEDOUT:
+		return ERR_LE_CONN_TIMEOUT;
+	case EMLINK:
+		return ERR_LE_CONN_SYNC_CONNECT_LIMIT;
+	case ECONNRESET:
+		return ERR_LE_CONN_ABORT_BY_REMOTE;
+	case ECONNABORTED:
+		return ERR_LE_CONN_ABORT_BY_LOCAL;
+	case EPROTO:
+		return ERR_LE_CONN_LL_PROTO_ERROR;
+	case EBADE:
+		return ERR_LE_CONN_KEY_MISSING;
+	default:
+		return ERR_LE_CONN_UNKNOWN;
+	}
 }

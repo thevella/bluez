@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2011  Intel Corporation
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -34,6 +21,7 @@
 #include "lib/sdp.h"
 #include "src/shared/tester.h"
 #include "src/shared/util.h"
+#include "src/shared/ad.h"
 #include "src/eir.h"
 
 struct test_data {
@@ -552,6 +540,54 @@ static void print_debug(const char *str, void *user_data)
 	tester_debug("%s%s", prefix, str);
 }
 
+static void test_ad(const struct test_data *test, struct eir_data *eir)
+{
+	struct bt_ad *ad;
+	GSList *list;
+
+	ad = bt_ad_new_with_data(test->eir_size, test->eir_data);
+	g_assert(ad);
+
+	g_assert_cmpint(bt_ad_get_flags(ad), ==, test->flags);
+	g_assert_cmpstr(bt_ad_get_name(ad), ==, test->name);
+	g_assert_cmpint(bt_ad_get_tx_power(ad), ==, test->tx_power);
+
+	if (test->uuid) {
+		int i;
+
+		for (i = 0; test->uuid[i]; i++) {
+			bt_uuid_t uuid;
+
+			bt_string_to_uuid(&uuid, test->uuid[i]);
+			g_assert(bt_ad_has_service_uuid(ad, &uuid));
+		}
+	}
+
+	for (list = eir->msd_list; list; list = list->next) {
+		struct eir_msd *msd = list->data;
+		struct bt_ad_manufacturer_data adm;
+
+		adm.manufacturer_id = msd->company;
+		adm.data = msd->data;
+		adm.len = msd->data_len;
+
+		g_assert(bt_ad_has_manufacturer_data(ad, &adm));
+	}
+
+	for (list = eir->sd_list; list; list = list->next) {
+		struct eir_sd *sd = list->data;
+		struct bt_ad_service_data ads;
+
+		bt_string_to_uuid(&ads.uuid, sd->uuid);
+		ads.data = sd->data;
+		ads.len = sd->data_len;
+
+		g_assert(bt_ad_has_service_data(ad, &ads));
+	}
+
+	bt_ad_unref(ad);
+}
+
 static void test_parsing(gconstpointer data)
 {
 	const struct test_data *test = data;
@@ -611,6 +647,8 @@ static void test_parsing(gconstpointer data)
 		util_hexdump(' ', sd->data, sd->data_len, print_debug,
 							"Service Data:");
 	}
+
+	test_ad(data, &eir);
 
 	eir_data_free(&eir);
 

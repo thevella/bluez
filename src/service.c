@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012-2013  BMW Car IT GmbH. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -54,6 +41,8 @@ struct btd_service {
 	void			*user_data;
 	btd_service_state_t	state;
 	int			err;
+	bool			is_allowed;
+	bool			initiator;
 };
 
 struct service_state_callback {
@@ -108,6 +97,9 @@ static void change_state(struct btd_service *service, btd_service_state_t state,
 
 		cb->cb(service, old, state, cb->user_data);
 	}
+
+	if (state == BTD_SERVICE_STATE_DISCONNECTED)
+		service->initiator = false;
 }
 
 struct btd_service *btd_service_ref(struct btd_service *service)
@@ -146,6 +138,7 @@ struct btd_service *service_create(struct btd_device *device,
 	service->device = device; /* Weak ref */
 	service->profile = profile;
 	service->state = BTD_SERVICE_STATE_UNAVAILABLE;
+	service->is_allowed = true;
 
 	return service;
 }
@@ -179,7 +172,7 @@ void service_remove(struct btd_service *service)
 	btd_service_unref(service);
 }
 
-int service_accept(struct btd_service *service)
+int service_accept(struct btd_service *service, bool initiator)
 {
 	char addr[18];
 	int err;
@@ -198,6 +191,14 @@ int service_accept(struct btd_service *service)
 
 	if (!service->profile->accept)
 		return -ENOSYS;
+
+	if (!service->is_allowed) {
+		info("service %s is not allowed",
+						service->profile->remote_uuid);
+		return -ECONNABORTED;
+	}
+
+	service->initiator = initiator;
 
 	err = service->profile->accept(service);
 	if (!err)
@@ -242,6 +243,9 @@ int btd_service_connect(struct btd_service *service)
 	if (!profile->connect)
 		return -ENOTSUP;
 
+	if (!btd_adapter_get_powered(device_get_adapter(service->device)))
+		return -ENETDOWN;
+
 	switch (service->state) {
 	case BTD_SERVICE_STATE_UNAVAILABLE:
 		return -EINVAL;
@@ -255,8 +259,15 @@ int btd_service_connect(struct btd_service *service)
 		return -EBUSY;
 	}
 
+	if (!service->is_allowed) {
+		info("service %s is not allowed",
+						service->profile->remote_uuid);
+		return -ECONNABORTED;
+	}
+
 	err = profile->connect(service);
 	if (err == 0) {
+		service->initiator = true;
 		change_state(service, BTD_SERVICE_STATE_CONNECTING, 0);
 		return 0;
 	}
@@ -339,6 +350,11 @@ int btd_service_get_error(const struct btd_service *service)
 	return service->err;
 }
 
+bool btd_service_is_initiator(const struct btd_service *service)
+{
+	return service->initiator;
+}
+
 unsigned int btd_service_add_state_cb(btd_service_state_cb cb, void *user_data)
 {
 	struct service_state_callback *state_cb;
@@ -369,6 +385,25 @@ bool btd_service_remove_state_cb(unsigned int id)
 	}
 
 	return false;
+}
+
+void btd_service_set_allowed(struct btd_service *service, bool allowed)
+{
+	if (allowed == service->is_allowed)
+		return;
+
+	service->is_allowed = allowed;
+
+	if (!allowed && (service->state == BTD_SERVICE_STATE_CONNECTING ||
+			service->state == BTD_SERVICE_STATE_CONNECTED)) {
+		btd_service_disconnect(service);
+		return;
+	}
+}
+
+bool btd_service_is_allowed(struct btd_service *service)
+{
+	return service->is_allowed;
 }
 
 void btd_service_connecting_complete(struct btd_service *service, int err)

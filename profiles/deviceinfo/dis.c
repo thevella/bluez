@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012 Texas Instruments, Inc.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -85,7 +72,7 @@ static void dis_free(struct bt_dis *dis)
 {
 	bt_dis_detach(dis);
 
-	g_free(dis->primary);
+	free(dis->primary);
 	queue_destroy(dis->gatt_op, (void *) destroy_gatt_req);
 	g_free(dis);
 }
@@ -156,7 +143,7 @@ struct bt_dis *bt_dis_new_primary(void *primary)
 	dis->gatt_op = queue_new();
 
 	if (primary)
-		dis->primary = g_memdup(primary, sizeof(*dis->primary));
+		dis->primary = util_memdup(primary, sizeof(*dis->primary));
 
 	return bt_dis_ref(dis);
 }

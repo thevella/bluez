@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  OBEX library with GLib integration
  *
  *  Copyright (C) 2011  Intel Corporation. All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -30,6 +17,7 @@
 #include "gobex-defs.h"
 #include "gobex-packet.h"
 #include "gobex-debug.h"
+#include "src/shared/util.h"
 
 #define FINAL_BIT 0x80
 
@@ -214,7 +202,7 @@ gboolean g_obex_packet_set_data(GObexPacket *pkt, const void *data, gsize len,
 
 	switch (data_policy) {
 	case G_OBEX_DATA_COPY:
-		pkt->data.buf = g_memdup(data, len);
+		pkt->data.buf = util_memdup(data, len);
 		break;
 	case G_OBEX_DATA_REF:
 		pkt->data.buf_ref = data;
@@ -272,7 +260,7 @@ void g_obex_packet_free(GObexPacket *pkt)
 	switch (pkt->data_policy) {
 	case G_OBEX_DATA_INHERIT:
 	case G_OBEX_DATA_COPY:
-		g_free(pkt->data.buf);
+		free(pkt->data.buf);
 		break;
 	case G_OBEX_DATA_REF:
 		break;

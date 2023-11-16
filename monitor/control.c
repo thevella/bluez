@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011-2014  Intel Corporation
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -318,19 +305,19 @@ static void mgmt_new_long_term_key(uint16_t len, const void *buf)
 		return;
 	}
 
-	/* LE SC keys are both for master and slave */
+	/* LE SC keys are both for central and peripheral */
 	switch (ev->key.type) {
 	case 0x00:
-		if (ev->key.master)
-			type = "Master (Unauthenticated)";
+		if (ev->key.central)
+			type = "Central (Unauthenticated)";
 		else
-			type = "Slave (Unauthenticated)";
+			type = "Peripheral (Unauthenticated)";
 		break;
 	case 0x01:
-		if (ev->key.master)
-			type = "Master (Authenticated)";
+		if (ev->key.central)
+			type = "Central (Authenticated)";
 		else
-			type = "Slave (Authenticated)";
+			type = "Peripheral (Authenticated)";
 		break;
 	case 0x02:
 		type = "SC (Unauthenticated)";
@@ -1084,7 +1071,12 @@ static int open_channel(uint16_t channel)
 	if (filter_index != HCI_DEV_NONE)
 		attach_index_filter(data->fd, filter_index);
 
-	mainloop_add_fd(data->fd, EPOLLIN, data_callback, data, free_data);
+	if (mainloop_add_fd(data->fd, EPOLLIN, data_callback,
+						data, free_data) < 0) {
+		close(data->fd);
+		free(data);
+		return -1;
+	};
 
 	return 0;
 }
@@ -1161,7 +1153,11 @@ static void server_accept_callback(int fd, uint32_t events, void *user_data)
 	data->channel = HCI_CHANNEL_MONITOR;
 	data->fd = nfd;
 
-        mainloop_add_fd(data->fd, EPOLLIN, client_callback, data, free_data);
+	if (mainloop_add_fd(data->fd, EPOLLIN, client_callback,
+						data, free_data) < 0) {
+		close(data->fd);
+		free(data);
+	}
 }
 
 static int server_fd = -1;
@@ -1169,14 +1165,12 @@ static int server_fd = -1;
 void control_server(const char *path)
 {
 	struct sockaddr_un addr;
-	size_t len;
 	int fd;
 
 	if (server_fd >= 0)
 		return;
 
-	len = strlen(path);
-	if (len > sizeof(addr.sun_path) - 1) {
+	if (strlen(path) > sizeof(addr.sun_path) - 1) {
 		fprintf(stderr, "Socket name too long\n");
 		return;
 	}
@@ -1191,7 +1185,7 @@ void control_server(const char *path)
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sun_family = AF_UNIX;
-	strncpy(addr.sun_path, path, len - 1);
+	strcpy(addr.sun_path, path);
 
 	if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
 		perror("Failed to bind server socket");
@@ -1412,7 +1406,12 @@ int control_tty(const char *path, unsigned int speed)
 	data->channel = HCI_CHANNEL_MONITOR;
 	data->fd = fd;
 
-	mainloop_add_fd(data->fd, EPOLLIN, tty_callback, data, free_data);
+	if (mainloop_add_fd(data->fd, EPOLLIN, tty_callback,
+						data, free_data) < 0) {
+		close(data->fd);
+		free(data);
+		return -1;
+	}
 
 	return 0;
 }

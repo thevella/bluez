@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -29,6 +16,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/utsname.h>
 
 #include "lib/bluetooth.h"
 #include "lib/sdp.h"
@@ -57,8 +46,10 @@
 static uint8_t major_class = MAJOR_CLASS_MISCELLANEOUS;
 static uint8_t minor_class = MINOR_CLASS_UNCATEGORIZED;
 
-static char *pretty_hostname = NULL;
-static char *static_hostname = NULL;
+static char *pretty_hostname    = NULL;
+static char *static_hostname    = NULL;
+static char *transient_hostname = NULL;
+static guint hostname_id = 0;
 
 /*
  * Fallback to static hostname only if empty pretty hostname was already
@@ -73,6 +64,10 @@ static const char *get_hostname(void)
 		if (static_hostname &&
 				g_str_equal(static_hostname, "") == FALSE)
 			return static_hostname;
+
+		if (transient_hostname &&
+				g_str_equal(transient_hostname, "") == FALSE)
+			return transient_hostname;
 	}
 
 	return NULL;
@@ -141,7 +136,7 @@ static void property_changed(GDBusProxy *proxy, const char *name,
 
 			dbus_message_iter_get_basic(iter, &str);
 
-			DBG("pretty hostname: %s", str);
+			DBG("pretty hostname: '%s'", str);
 
 			g_free(pretty_hostname);
 			pretty_hostname = g_strdup(str);
@@ -159,7 +154,7 @@ static void property_changed(GDBusProxy *proxy, const char *name,
 
 			dbus_message_iter_get_basic(iter, &str);
 
-			DBG("static hostname: %s", str);
+			DBG("static hostname: '%s'", str);
 
 			g_free(static_hostname);
 			static_hostname = g_strdup(str);
@@ -178,7 +173,7 @@ static void property_changed(GDBusProxy *proxy, const char *name,
 
 			dbus_message_iter_get_basic(iter, &str);
 
-			DBG("chassis: %s", str);
+			DBG("chassis: '%s'", str);
 
 			for (i = 0; chassis_table[i].chassis; i++) {
 				if (strcmp(chassis_table[i].chassis, str))
@@ -192,6 +187,32 @@ static void property_changed(GDBusProxy *proxy, const char *name,
 			}
 		}
 	}
+}
+
+static void read_transient_hostname(void)
+{
+	struct utsname u;
+
+	if (uname(&u) != 0) {
+		g_free(transient_hostname);
+		transient_hostname = NULL;
+		DBG("failed to read transient hostname");
+		return;
+	}
+
+	g_free(transient_hostname);
+	transient_hostname = g_strdup(u.nodename);
+
+	DBG("read transient hostname: '%s'", transient_hostname);
+}
+
+static gboolean hostname_cb(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	DBG("transient hostname changed");
+	read_transient_hostname();
+	adapter_foreach(update_class, NULL);
+	return TRUE;
 }
 
 static int hostname_probe(struct btd_adapter *adapter)
@@ -226,10 +247,9 @@ static void read_dmi_fallback(void)
 		return;
 
 	type = atoi(contents);
+	g_free(contents);
 	if (type < 0 || type > 0x1D)
 		return;
-
-	g_free(contents);
 
 	/* from systemd hostname chassis list */
 	switch (type) {
@@ -275,9 +295,11 @@ static GDBusProxy *hostname_proxy = NULL;
 static int hostname_init(void)
 {
 	DBusConnection *conn = btd_get_dbus_connection();
+	int fd;
 	int err;
 
 	read_dmi_fallback();
+	read_transient_hostname();
 
 	hostname_client = g_dbus_client_new(conn, "org.freedesktop.hostname1",
 						"/org/freedesktop/hostname1");
@@ -303,6 +325,17 @@ static int hostname_init(void)
 		hostname_client = NULL;
 	}
 
+	fd = open("/proc/sys/kernel/hostname", O_RDONLY);
+	if (fd < 0) {
+		error("open(/proc/sys/kernel/hostname): %s (%d)",
+					strerror(errno), errno);
+	} else {
+		GIOChannel *io = g_io_channel_unix_new(fd);
+
+		hostname_id = g_io_add_watch(io, G_IO_ERR, hostname_cb, NULL);
+		g_io_channel_unref(io);
+	}
+
 	return err;
 }
 
@@ -320,8 +353,14 @@ static void hostname_exit(void)
 		hostname_client = NULL;
 	}
 
+	if (hostname_id != 0) {
+		g_source_remove(hostname_id);
+		hostname_id = 0;
+	}
+
 	g_free(pretty_hostname);
 	g_free(static_hostname);
+	g_free(transient_hostname);
 }
 
 BLUETOOTH_PLUGIN_DEFINE(hostname, VERSION, BLUETOOTH_PLUGIN_PRIORITY_DEFAULT,

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011-2012  Intel Corporation
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -60,8 +47,10 @@ struct sockaddr_hci {
 	unsigned short  hci_channel;
 };
 #define HCI_CHANNEL_USER	1
+#define HCI_INDEX_NONE		0xffff
+#define HCI_INDEX_MAX		16
 
-static uint16_t hci_index = 0;
+static uint64_t hci_index = HCI_INDEX_NONE;
 static bool client_active = false;
 static bool debug_enabled = false;
 static bool emulate_ecc = false;
@@ -545,12 +534,20 @@ static bool setup_proxy(int host_fd, bool host_shutdown,
 	return true;
 }
 
-static int open_channel(uint16_t index)
+static int open_channel(uint64_t hci_index)
 {
 	struct sockaddr_hci addr;
-	int fd;
+	int fd, err;
+	uint8_t index;
 
-	printf("Opening user channel for hci%u\n", hci_index);
+	index = util_get_uid(&hci_index, HCI_INDEX_MAX);
+	if (index == 0) {
+		perror("No controller available");
+		return -1;
+	}
+	index--;
+
+	printf("Opening user channel for hci%u\n", index);
 
 	fd = socket(PF_BLUETOOTH, SOCK_RAW | SOCK_CLOEXEC, BTPROTO_HCI);
 	if (fd < 0) {
@@ -564,7 +561,15 @@ static int open_channel(uint16_t index)
 	addr.hci_channel = HCI_CHANNEL_USER;
 
 	if (bind(fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+		err = -errno;
 		close(fd);
+
+		/* Open next available controller if the error indicates
+		 * that the controller is in use.
+		 */
+		if (err == -EBUSY || err == -EUSERS)
+			return open_channel(hci_index);
+
 		perror("Failed to bind Bluetooth socket");
 		return -1;
 	}
@@ -598,12 +603,6 @@ static void server_callback(int fd, uint32_t events, void *user_data)
 	host_fd = accept(fd, &addr.common, &len);
 	if (host_fd < 0) {
 		perror("Failed to accept client socket");
-		return;
-	}
-
-	if (client_active) {
-		fprintf(stderr, "Active client already present\n");
-		close(host_fd);
 		return;
 	}
 
@@ -800,6 +799,7 @@ int main(int argc, char *argv[])
 
 	for (;;) {
 		int opt;
+		int index;
 
 		opt = getopt_long(argc, argv, "rc:l::u::p:i:aezdvh",
 						main_options, NULL);
@@ -844,7 +844,13 @@ int main(int argc, char *argv[])
 				usage();
 				return EXIT_FAILURE;
 			}
-			hci_index = atoi(str);
+			index = atoi(str) + 1;
+			if (index > HCI_INDEX_MAX) {
+				fprintf(stderr, "Invalid controller index\n");
+				usage();
+				return EXIT_FAILURE;
+			}
+			util_clear_uid(&hci_index, index);
 			break;
 		case 'a':
 			type = HCI_AMP;
@@ -883,6 +889,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Invalid to specify client and server mode\n");
 		return EXIT_FAILURE;
 	}
+
+	if (hci_index == HCI_INDEX_NONE)
+		hci_index = 0;
 
 	mainloop_init();
 

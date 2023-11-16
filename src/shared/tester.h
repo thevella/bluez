@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,25 +6,22 @@
  *  Copyright (C) 2012-2014  Intel Corporation. All rights reserved.
  *
  *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/uio.h>
+
+#define data(args...) ((const unsigned char[]) { args })
+
+#define IOV_DATA(args...) \
+	{ \
+		.iov_base = (void *)data(args), \
+		.iov_len = sizeof(data(args)), \
+	}
+
+#define IOV_NULL {}
 
 void tester_init(int *argc, char ***argv);
 int tester_run(void);
@@ -79,3 +77,7 @@ typedef void (*tester_wait_func_t)(void *user_data);
 
 void tester_wait(unsigned int seconds, tester_wait_func_t func,
 							void *user_data);
+
+struct io *tester_setup_io(const struct iovec *iov, int iovcnt);
+void tester_io_send(void);
+void tester_io_set_complete_func(tester_data_func_t func);

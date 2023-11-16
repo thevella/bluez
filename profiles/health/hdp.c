@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2010 GSyC/LibreSoft, Universidad Rey Juan Carlos.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -44,6 +31,8 @@
 #include "src/adapter.h"
 #include "src/device.h"
 #include "src/sdpd.h"
+#include "src/shared/timeout.h"
+#include "src/shared/util.h"
 #include "btio/btio.h"
 
 #include "hdp_types.h"
@@ -83,7 +72,7 @@ struct hdp_tmp_dc_data {
 struct hdp_echo_data {
 	gboolean		echo_done;	/* Is a echo was already done */
 	gpointer		buf;		/* echo packet sent */
-	guint			tid;		/* echo timeout */
+	unsigned int		tid;		/* echo timeout */
 };
 
 static struct hdp_channel *hdp_channel_ref(struct hdp_channel *chan)
@@ -587,7 +576,7 @@ static void device_reconnect_mdl_cb(struct mcap_mdl *mdl, GError *err,
 					"Cannot reconnect: %s", gerr->message);
 	g_dbus_send_message(conn, reply);
 	hdp_tmp_dc_data_unref(dc_data);
-	g_error_free(gerr);
+	g_clear_error(&gerr);
 
 	/* Send abort request because remote side is now in PENDING state */
 	if (!mcap_mdl_abort(mdl, abort_mdl_cb, NULL, NULL, &gerr)) {
@@ -696,7 +685,7 @@ static void free_echo_data(struct hdp_echo_data *edata)
 		return;
 
 	if (edata->tid > 0)
-		g_source_remove(edata->tid);
+		timeout_remove(edata->tid);
 
 	if (edata->buf != NULL)
 		g_free(edata->buf);
@@ -1496,13 +1485,15 @@ static void destroy_create_dc_data(gpointer data)
 static void *generate_echo_packet(void)
 {
 	uint8_t *buf;
-	int i;
 
 	buf = g_malloc(HDP_ECHO_LEN);
-	srand(time(NULL));
+	if (!buf)
+		return NULL;
 
-	for(i = 0; i < HDP_ECHO_LEN; i++)
-		buf[i] = rand() % UINT8_MAX;
+	if (util_getrandom(buf, HDP_ECHO_LEN, 0) < 0) {
+		g_free(buf);
+		return NULL;
+	}
 
 	return buf;
 }
@@ -1537,7 +1528,7 @@ end:
 	reply = g_dbus_create_reply(hdp_conn->msg, DBUS_TYPE_BOOLEAN, &value,
 							DBUS_TYPE_INVALID);
 	g_dbus_send_message(btd_get_dbus_connection(), reply);
-	g_source_remove(edata->tid);
+	timeout_remove(edata->tid);
 	edata->tid = 0;
 	g_free(edata->buf);
 	edata->buf = NULL;
@@ -1551,7 +1542,7 @@ end:
 	return FALSE;
 }
 
-static gboolean echo_timeout(gpointer data)
+static bool echo_timeout(gpointer data)
 {
 	struct hdp_channel *chan = data;
 	GIOChannel *io;
@@ -1619,10 +1610,9 @@ static void hdp_echo_connect_cb(struct mcap_mdl *mdl, GError *err,
 	g_io_add_watch(io, G_IO_ERR | G_IO_HUP | G_IO_NVAL | G_IO_IN,
 			check_echo, hdp_tmp_dc_data_ref(hdp_conn));
 
-	edata->tid = g_timeout_add_seconds_full(G_PRIORITY_DEFAULT,
-					ECHO_TIMEOUT, echo_timeout,
-					hdp_channel_ref(hdp_conn->hdp_chann),
-					(GDestroyNotify) hdp_channel_unref);
+	edata->tid = timeout_add_seconds(ECHO_TIMEOUT, echo_timeout,
+				hdp_channel_ref(hdp_conn->hdp_chann),
+				(timeout_destroy_func_t) hdp_channel_unref);
 
 	g_io_channel_unref(io);
 }
@@ -1776,7 +1766,7 @@ static void device_create_mdl_cb(struct mcap_mdl *mdl, uint8_t conf,
 		return;
 
 	error("%s", gerr->message);
-	g_error_free(gerr);
+	g_clear_error(&gerr);
 
 	reply = g_dbus_create_reply(hdp_conn->msg,
 					DBUS_TYPE_OBJECT_PATH, &hdp_chan->path,
@@ -1800,7 +1790,7 @@ fail:
 						ERROR_INTERFACE ".HealthError",
 						"%s", gerr->message);
 	g_dbus_send_message(conn, reply);
-	g_error_free(gerr);
+	g_clear_error(&gerr);
 
 	/* Send abort request because remote side is now in PENDING */
 	/* state. Then we have to delete it because we couldn't */

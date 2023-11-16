@@ -1,23 +1,11 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Google Inc.
+ *  Copyright 2023 NXP
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -114,9 +102,10 @@ struct bt_att_pdu_error_rsp {
 /*
  * Common Profile and Service Error Code descriptions (see Supplement to the
  * Bluetooth Core Specification, sections 1.2 and 2). The error codes within
- * 0xE0-0xFC are reserved for future use. The remaining 3 are defined as the
+ * 0xE0-0xFB are reserved for future use. The remaining 4 are defined as the
  * following:
  */
+#define BT_ERROR_WRITE_REQUEST_REJECTED         0xfc
 #define BT_ERROR_CCC_IMPROPERLY_CONFIGURED      0xfd
 #define BT_ERROR_ALREADY_IN_PROGRESS            0xfe
 #define BT_ERROR_OUT_OF_RANGE                   0xff
@@ -142,6 +131,14 @@ struct bt_att_pdu_error_rsp {
 #define BT_ATT_PERM_WRITE_SECURE	0x0200
 #define BT_ATT_PERM_SECURE		(BT_ATT_PERM_READ_SECURE | \
 					BT_ATT_PERM_WRITE_SECURE)
+#define BT_ATT_PERM_READ_MASK		(BT_ATT_PERM_READ | \
+					BT_ATT_PERM_READ_AUTHEN | \
+					BT_ATT_PERM_READ_ENCRYPT | \
+					BT_ATT_PERM_READ_SECURE)
+#define BT_ATT_PERM_WRITE_MASK		(BT_ATT_PERM_WRITE | \
+					BT_ATT_PERM_WRITE_AUTHEN | \
+					BT_ATT_PERM_WRITE_ENCRYPT | \
+					BT_ATT_PERM_WRITE_SECURE)
 
 /* GATT Characteristic Properties Bitfield values */
 #define BT_GATT_CHRC_PROP_BROADCAST			0x01
@@ -156,14 +153,6 @@ struct bt_att_pdu_error_rsp {
 /* GATT Characteristic Extended Properties Bitfield values */
 #define BT_GATT_CHRC_EXT_PROP_RELIABLE_WRITE		0x01
 #define BT_GATT_CHRC_EXT_PROP_WRITABLE_AUX		0x02
-#define BT_GATT_CHRC_EXT_PROP_ENC_READ			0x04
-#define BT_GATT_CHRC_EXT_PROP_ENC_WRITE			0x08
-#define BT_GATT_CHRC_EXT_PROP_ENC	(BT_GATT_CHRC_EXT_PROP_ENC_READ | \
-					BT_GATT_CHRC_EXT_PROP_ENC_WRITE)
-#define BT_GATT_CHRC_EXT_PROP_AUTH_READ			0x10
-#define BT_GATT_CHRC_EXT_PROP_AUTH_WRITE		0x20
-#define BT_GATT_CHRC_EXT_PROP_AUTH	(BT_GATT_CHRC_EXT_PROP_AUTH_READ | \
-					BT_GATT_CHRC_EXT_PROP_AUTH_WRITE)
 
 /* GATT Characteristic Client Features Bitfield values */
 #define BT_GATT_CHRC_CLI_FEAT_ROBUST_CACHING		0x01

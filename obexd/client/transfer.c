@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  OBEX Client
@@ -5,20 +6,6 @@
  *  Copyright (C) 2007-2010  Marcel Holtmann <marcel@holtmann.org>
  *  Copyright (C) 2011-2012  BMW Car IT GmbH. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -433,8 +420,11 @@ static void obc_transfer_free(struct obc_transfer *transfer)
 
 	if (transfer->op == G_OBEX_OP_GET &&
 				transfer->status != TRANSFER_STATUS_COMPLETE &&
-				transfer->filename)
-		remove(transfer->filename);
+				transfer->filename) {
+		if (remove(transfer->filename) < 0)
+			error("remove(%s): %s(%d)", transfer->filename,
+							strerror(errno), errno);
+	}
 
 	if (transfer->fd > 0)
 		close(transfer->fd);
@@ -534,7 +524,10 @@ static gboolean transfer_open(struct obc_transfer *transfer, int flags,
 	}
 
 	if (transfer->filename == NULL) {
-		remove(filename); /* remove always only if NULL was given */
+		/* remove always only if NULL was given */
+		if (remove(filename) < 0)
+			error("remove(%s): %s(%d)", filename, strerror(errno),
+									errno);
 		g_free(filename);
 	} else {
 		g_free(transfer->filename);
@@ -673,7 +666,10 @@ static void xfer_complete(GObex *obex, GError *err, gpointer user_data)
 	else
 		transfer_set_status(transfer, TRANSFER_STATUS_COMPLETE);
 
-	if (callback)
+	if (callback == NULL)
+		return;
+
+	if (callback->func)
 		callback->func(transfer, err, callback->data);
 }
 

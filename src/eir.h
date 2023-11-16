@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -6,25 +7,12 @@
  *  Copyright (C) 2011  Marcel Holtmann <marcel@holtmann.org>
  *
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 
 #include <glib.h>
 
 #include "lib/sdp.h"
+#include "lib/uuid.h"
 
 #define EIR_FLAGS                   0x01  /* flags */
 #define EIR_UUID16_SOME             0x02  /* 16-bit UUID, more available */
@@ -50,6 +38,7 @@
 #define EIR_SVC_DATA32              0x20  /* LE: Service data, 32-bit UUID */
 #define EIR_SVC_DATA128             0x21  /* LE: Service data, 128-bit UUID */
 #define EIR_TRANSPORT_DISCOVERY     0x26  /* Transport Discovery Service */
+#define EIR_CSIP_RSI                0x2e  /* Resolvable Set Identifier */
 #define EIR_MANUFACTURER_DATA       0xFF  /* Manufacturer Specific Data */
 
 /* Flags Descriptions */
@@ -89,6 +78,7 @@ struct eir_data {
 	uint32_t class;
 	uint16_t appearance;
 	bool name_complete;
+	bool rsi;
 	int8_t tx_power;
 	uint8_t *hash;
 	uint8_t *randomizer;
@@ -110,3 +100,4 @@ int eir_create_oob(const bdaddr_t *addr, const char *name, uint32_t cod,
 			uint16_t did_vendor, uint16_t did_product,
 			uint16_t did_version, uint16_t did_source,
 			sdp_list_t *uuids, uint8_t *data);
+struct eir_sd *eir_get_service_data(struct eir_data *eir, const char *uuid);

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -60,14 +47,16 @@ struct test_data {
 #define raw_pdu(args...) \
 	{							\
 		.valid = true,					\
-		.raw_data = g_memdup(raw_data(args), sizeof(raw_data(args))), \
+		.raw_data = util_memdup(raw_data(args),		\
+					sizeof(raw_data(args))), \
 		.raw_size = sizeof(raw_data(args)),		\
 	}
 
 #define raw_pdu_cont(cont, args...) \
 	{							\
 		.valid = true,					\
-		.raw_data = g_memdup(raw_data(args), sizeof(raw_data(args))), \
+		.raw_data = util_memdup(raw_data(args),		\
+					sizeof(raw_data(args))), \
 		.raw_size = sizeof(raw_data(args)),		\
 		.cont_len = cont,				\
 	}
@@ -79,7 +68,7 @@ struct test_data {
 		};							\
 		static struct test_data data;				\
 		data.mtu = _mtu;					\
-		data.pdu_list = g_memdup(pdus, sizeof(pdus));		\
+		data.pdu_list = util_memdup(pdus, sizeof(pdus));	\
 		tester_add(name, &data, NULL, test_sdp, NULL);		\
 	} while (0)
 
@@ -105,7 +94,7 @@ struct test_data_de {
 #define define_test_de_attr(name, input, exp) \
 	do {								\
 		static struct test_data_de data;			\
-		data.input_data = g_memdup(input, sizeof(input));	\
+		data.input_data = util_memdup(input, sizeof(input));	\
 		data.input_size = sizeof(input);			\
 		data.expected = exp;					\
 		tester_add("/sdp/DE/ATTR/" name, &data,	NULL,		\
@@ -248,7 +237,7 @@ static gboolean client_handler(GIOChannel *channel, GIOCondition cond,
 	tester_monitor('>', 0x0000, 0x0001, buf, len);
 
 	g_assert(len > 0);
-	g_assert((size_t) len == rsp_pdu->raw_size + rsp_pdu->cont_len);
+	g_assert_cmpuint(len, ==, rsp_pdu->raw_size + rsp_pdu->cont_len);
 
 	g_assert(memcmp(buf, rsp_pdu->raw_data,	rsp_pdu->raw_size) == 0);
 

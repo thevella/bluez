@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2015  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -72,32 +59,25 @@ struct context {
 #define raw_pdu(args...)					\
 {								\
 	.valid = true,						\
-	.data = g_memdup(data(args), sizeof(data(args))),	\
+	.data = util_memdup(data(args), sizeof(data(args))),	\
 	.size = sizeof(data(args)),				\
 }
 
-#define false_pdu()	\
-{						\
-		.valid = false, \
+#define false_pdu()						\
+{								\
+		.valid = false,					\
 }
 
-#define define_test(name, function, args...)      \
-	do {    \
-		const struct test_pdu pdus[] = {			\
-			args, { }					\
-		};		\
-		static struct test_data data;      \
-		data.test_name = g_strdup(name);   \
-		data.pdu_list = g_memdup(pdus, sizeof(pdus));		\
-		tester_add(name, &data, NULL, function, NULL);     \
+#define define_test(name, function, args...)			\
+	do {							\
+		const struct test_pdu pdus[] = {		\
+			args, { }				\
+		};						\
+		static struct test_data data;			\
+		data.test_name = g_strdup(name);		\
+		data.pdu_list = util_memdup(pdus, sizeof(pdus));\
+		tester_add(name, &data, NULL, function, NULL);	\
 	} while (0)
-
-static void test_debug(const char *str, void *user_data)
-{
-	const char *prefix = user_data;
-
-	tester_debug("%s%s", prefix, str);
-}
 
 static gboolean context_quit(gpointer user_data)
 {
@@ -130,7 +110,7 @@ static gboolean send_pdu(gpointer user_data)
 
 	len = write(context->fd, pdu->data, pdu->size);
 
-	util_hexdump('<', pdu->data, len, test_debug, "hog: ");
+	tester_monitor('<', 0x0004, 0x0000, pdu->data, len);
 
 	g_assert_cmpint(len, ==, pdu->size);
 
@@ -165,7 +145,7 @@ static gboolean test_handler(GIOChannel *channel, GIOCondition cond,
 
 	g_assert(len > 0);
 
-	util_hexdump('>', buf, len, test_debug, "hog: ");
+	tester_monitor('>', 0x0004, 0x0000, buf, len);
 
 	g_assert_cmpint(len, ==, pdu->size);
 
@@ -256,17 +236,7 @@ int main(int argc, char *argv[])
 			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
 			0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
 			0x15, 0x16),
-		raw_pdu(0x0a, 0x08, 0x00),
-		raw_pdu(0x0b, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-			0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
-			0x15, 0x16),
 		raw_pdu(0x0c, 0x04, 0x00, 0x16, 0x00),
-		raw_pdu(0x0d, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
-			0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
-			0x15, 0x16),
-		raw_pdu(0x0c, 0x08, 0x00, 0x16, 0x00),
 		raw_pdu(0x0d, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
 			0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
@@ -275,6 +245,16 @@ int main(int argc, char *argv[])
 		raw_pdu(0x0d, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
 			0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13),
+		raw_pdu(0x0a, 0x08, 0x00),
+		raw_pdu(0x0b, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+			0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+			0x15, 0x16),
+		raw_pdu(0x0c, 0x08, 0x00, 0x16, 0x00),
+		raw_pdu(0x0d, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+			0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+			0x15, 0x16),
 		raw_pdu(0x0c, 0x08, 0x00, 0x2c, 0x00),
 		raw_pdu(0x0d, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
 			0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,

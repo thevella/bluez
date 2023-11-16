@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011-2014  Intel Corporation
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -323,7 +310,7 @@ static void slot_offset(const void *data, uint8_t size)
 	const struct bt_lmp_slot_offset *pdu = data;
 
 	print_field("Offset: %u usec", le16_to_cpu(pdu->offset));
-	packet_print_addr("Address", pdu->bdaddr, false);
+	packet_print_addr("Address", pdu->bdaddr, 0x00);
 }
 
 static void page_scan_mode_req(const void *data, uint8_t size)
@@ -852,7 +839,7 @@ void lmp_packet(const void *data, uint8_t size, bool padded)
 	tid = ((const uint8_t *) data)[0] & 0x01;
 	opcode = (((const uint8_t *) data)[0] & 0xfe) >> 1;
 
-	tid_str = tid == 0x00 ? "Master" : "Slave";
+	tid_str = tid == 0x00 ? "Central" : "Peripheral";
 
 	switch (opcode) {
 	case 127:

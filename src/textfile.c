@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -32,6 +19,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -39,6 +27,42 @@
 #include <sys/param.h>
 
 #include "textfile.h"
+
+int create_filename(char *str, size_t size, const char *fmt, ...)
+{
+	static const char *prefix;
+	static int prefix_len;
+	char suffix[PATH_MAX];
+	va_list ap;
+	int err;
+
+	if (!prefix) {
+		const char *statedir = getenv("STATE_DIRECTORY");
+
+		/* Check if running as service */
+		if (statedir) {
+			prefix = statedir;
+
+			/* Check if there multiple paths given */
+			if (strstr(prefix, ":"))
+				prefix_len = strstr(prefix, ":") - prefix;
+			else
+				prefix_len = strlen(prefix);
+		} else {
+			prefix = STORAGEDIR;
+			prefix_len = strlen(prefix);
+		}
+	}
+
+	va_start(ap, fmt);
+	err = vsnprintf(suffix, sizeof(suffix), fmt, ap);
+	va_end(ap);
+
+	if (err < 0)
+		return err;
+
+	return snprintf(str, size, "%*s%s", prefix_len, prefix, suffix);
+}
 
 static int create_dirs(const char *filename, const mode_t mode)
 {
@@ -78,7 +102,7 @@ int create_file(const char *filename, const mode_t mode)
 {
 	int fd;
 
-	create_dirs(filename, S_IRUSR | S_IWUSR | S_IXUSR);
+	create_dirs(filename, 0700);
 
 	fd = open(filename, O_RDWR | O_CREAT, mode);
 	if (fd < 0)
@@ -89,9 +113,9 @@ int create_file(const char *filename, const mode_t mode)
 	return 0;
 }
 
-int create_name(char *buf, size_t size, const char *path, const char *address, const char *name)
+int create_name(char *buf, size_t size, const char *address, const char *name)
 {
-	return snprintf(buf, size, "%s/%s/%s", path, address, name);
+	return create_filename(buf, size, "/%s/%s", address, name);
 }
 
 static inline char *find_key(char *map, size_t size, const char *key, size_t len, int icase)

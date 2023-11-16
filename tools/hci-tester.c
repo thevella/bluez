@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2013  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -348,14 +335,14 @@ static void test_read_local_supported_codecs(const void *test_data)
 	test_command(BT_HCI_CMD_READ_LOCAL_CODECS);
 }
 
-static void test_le_read_white_list_size(const void *test_data)
+static void test_le_read_accept_list_size(const void *test_data)
 {
-	test_command(BT_HCI_CMD_LE_READ_WHITE_LIST_SIZE);
+	test_command(BT_HCI_CMD_LE_READ_ACCEPT_LIST_SIZE);
 }
 
-static void test_le_clear_white_list(const void *test_data)
+static void test_le_clear_accept_list(const void *test_data)
 {
-	test_command(BT_HCI_CMD_LE_CLEAR_WHITE_LIST);
+	test_command(BT_HCI_CMD_LE_CLEAR_ACCEPT_LIST);
 }
 
 static void test_le_encrypt_complete(const void *data, uint8_t size,
@@ -957,10 +944,10 @@ int main(int argc, char *argv[])
 	test_hci_local("Read Local Supported Codecs", NULL, NULL,
 				test_read_local_supported_codecs);
 
-	test_hci_local("LE Read White List Size", NULL, NULL,
-				test_le_read_white_list_size);
-	test_hci_local("LE Clear White List", NULL, NULL,
-				test_le_clear_white_list);
+	test_hci_local("LE Read Accept List Size", NULL, NULL,
+				test_le_read_accept_list_size);
+	test_hci_local("LE Clear Accept List", NULL, NULL,
+				test_le_clear_accept_list);
 	test_hci_local("LE Encrypt", NULL, NULL,
 				test_le_encrypt);
 	test_hci_local("LE Rand", NULL, NULL,

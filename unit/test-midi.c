@@ -1,24 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2015,2016 Felipe F. Tonello <eu@felipetonello.com>
  *  Copyright (C) 2016 ROLI Ltd.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  *
  */
 
@@ -539,6 +525,46 @@ static const snd_seq_event_t event5_expect[] = {
 
 static const struct midi_write_test midi5 = BLE_WRITE_TEST_INIT(event5, event5_expect);
 
+struct midi_data {
+	size_t events_tested;
+	const struct midi_write_test *midi_test;
+	struct midi_read_parser *midi_in;
+} midi_data;
+
+static void compare_events_cb(const struct midi_write_parser *parser,
+						void *user_data)
+{
+	struct midi_data *midi_data = user_data;
+	const struct midi_write_test *midi_test = midi_data->midi_test;
+	struct midi_read_parser *midi_in = midi_data->midi_in;
+	size_t i = 0;
+
+	midi_read_reset(midi_in);
+
+	while (i < midi_write_data_size(parser)) {
+		snd_seq_event_t ev;
+		size_t count;
+
+		snd_seq_ev_clear(&ev);
+
+		count = midi_read_raw(midi_in, midi_write_data(parser) + i,
+					midi_write_data_size(parser) - i, &ev);
+
+		g_assert_cmpuint(count, >, 0);
+
+		if (ev.type != SND_SEQ_EVENT_NONE){
+			g_assert_cmpint(midi_data->events_tested, <,
+						midi_test->event_expect_size);
+			compare_events(&midi_test->event_expect
+				       [midi_data->events_tested],
+				       &ev);
+			midi_data->events_tested++;
+		}
+
+		i += count;
+	}
+};
+
 static void test_midi_writer(gconstpointer data)
 {
 	const struct midi_write_test *midi_test = data;
@@ -546,43 +572,7 @@ static void test_midi_writer(gconstpointer data)
 	struct midi_read_parser midi_in;
 	size_t i; /* event counter */
 	size_t j; /* test counter */
-	struct midi_data {
-		size_t events_tested;
-		const struct midi_write_test *midi_test;
-		struct midi_read_parser *midi_in;
-	} midi_data;
-
-	void compare_events_cb(const struct midi_write_parser *parser, void *user_data) {
-		struct midi_data *midi_data = user_data;
-		const struct midi_write_test *midi_test = midi_data->midi_test;
-		struct midi_read_parser *midi_in = midi_data->midi_in;
-		size_t i = 0;
-
-		midi_read_reset(midi_in);
-
-		while (i < midi_write_data_size(parser)) {
-			snd_seq_event_t ev;
-			size_t count;
-
-			snd_seq_ev_clear(&ev);
-
-			count = midi_read_raw(midi_in, midi_write_data(parser) + i,
-			                      midi_write_data_size(parser) - i, &ev);
-
-			g_assert_cmpuint(count, >, 0);
-
-			if (ev.type != SND_SEQ_EVENT_NONE){
-				g_assert_cmpint(midi_data->events_tested,
-				                <,
-				                midi_test->event_expect_size);
-				compare_events(&midi_test->event_expect[midi_data->events_tested],
-				               &ev);
-				midi_data->events_tested++;
-			}
-
-			i += count;
-		}
-	};
+	struct midi_data midi_data;
 
 	midi_read_init(&midi_in);
 

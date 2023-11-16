@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2018-2019  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
  *
  */
 
@@ -102,13 +93,6 @@ bool mesh_crypto_aes_ccm_encrypt(const uint8_t nonce[13], const uint8_t key[16],
 
 	result = l_aead_cipher_encrypt(cipher, msg, msg_len, aad, aad_len,
 					nonce, 13, out_msg, msg_len + mic_size);
-
-	if (result && out_mic) {
-		if (mic_size == 4)
-			*(uint32_t *)out_mic = l_get_be32(out_msg + msg_len);
-		else
-			*(uint64_t *)out_mic = l_get_be64(out_msg + msg_len);
-	}
 
 	l_aead_cipher_free(cipher);
 
@@ -260,9 +244,9 @@ bool mesh_crypto_nkbk(const uint8_t n[16], uint8_t beacon_key[16])
 	return crypto_128(n, "nkbk", beacon_key);
 }
 
-bool mesh_crypto_nkpk(const uint8_t n[16], uint8_t proxy_key[16])
+bool mesh_crypto_nkpk(const uint8_t n[16], uint8_t private_key[16])
 {
-	return crypto_128(n, "nkpk", proxy_key);
+	return crypto_128(n, "nkpk", private_key);
 }
 
 bool mesh_crypto_k3(const uint8_t n[16], uint8_t out64[8])
@@ -562,8 +546,11 @@ bool mesh_crypto_packet_build(bool ctl, uint8_t ttl,
 	n = 9;
 
 	if (!ctl) {
-		hdr = segmented << SEG_HDR_SHIFT;
+		uint32_t tmp = segmented ? 0x1 : 0;
+
+		hdr = tmp << SEG_HDR_SHIFT;
 		hdr |= (key_aid & KEY_ID_MASK) << KEY_HDR_SHIFT;
+
 		if (segmented) {
 			hdr |= szmic << SZMIC_HDR_SHIFT;
 			hdr |= (seqZero & SEQ_ZERO_MASK) << SEQ_ZERO_HDR_SHIFT;
@@ -1026,7 +1013,7 @@ static const uint8_t crypto_test_result[] = {
 	0x9a, 0x2a, 0xbf, 0x96
 };
 
-bool mesh_crypto_check_avail()
+bool mesh_crypto_check_avail(void)
 {
 	void *cipher;
 	bool result;

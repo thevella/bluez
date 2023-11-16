@@ -1,19 +1,9 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2019  Intel Corporation. All rights reserved.
- *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
  *
  *
  */
@@ -64,7 +54,7 @@ static void delete_bound_appkey(void *a)
 {
 	uint32_t idx = L_PTR_TO_UINT(a);
 
-	mesh_db_app_key_del(idx);
+	mesh_db_del_app_key(idx);
 }
 
 void keys_add_net_key(uint16_t net_idx)
@@ -112,7 +102,7 @@ void keys_set_net_key_phase(uint16_t net_idx, uint8_t phase, bool save)
 
 	key->phase = phase;
 
-	if (save && !mesh_db_net_key_phase_set(net_idx, phase))
+	if (save && !mesh_db_set_net_key_phase(net_idx, phase))
 		bt_shell_printf("Failed to save updated KR phase\n");
 }
 

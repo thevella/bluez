@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011-2014  Intel Corporation
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -52,7 +39,7 @@ static void print_handle(uint16_t handle)
 
 static void print_rssi(int8_t rssi)
 {
-	packet_print_rssi(rssi);
+	packet_print_rssi("RSSI", rssi);
 }
 
 static void print_sco_routing(uint8_t routing)
@@ -133,10 +120,10 @@ static void print_sync_mode(uint8_t mode)
 
 	switch (mode) {
 	case 0x00:
-		str = "Slave";
+		str = "Peripheral";
 		break;
 	case 0x01:
-		str = "Master";
+		str = "Central";
 		break;
 	default:
 		str = "Reserved";
@@ -152,10 +139,10 @@ static void print_clock_mode(uint8_t mode)
 
 	switch (mode) {
 	case 0x00:
-		str = "Slave";
+		str = "Peripheral";
 		break;
 	case 0x01:
-		str = "Master";
+		str = "Central";
 		break;
 	default:
 		str = "Reserved";
@@ -233,23 +220,24 @@ static void print_clock_setting(uint8_t clock)
 	print_field("UART clock: %s (0x%2.2x)", str, clock);
 }
 
-static void null_cmd(const void *data, uint8_t size)
+static void null_cmd(uint16_t index, const void *data, uint8_t size)
 {
 }
 
-static void status_rsp(const void *data, uint8_t size)
+static void status_rsp(uint16_t index, const void *data, uint8_t size)
 {
 	uint8_t status = get_u8(data);
 
 	print_status(status);
 }
 
-static void write_bd_addr_cmd(const void *data, uint8_t size)
+static void write_bd_addr_cmd(uint16_t index, const void *data, uint8_t size)
 {
-	packet_print_addr("Address", data, false);
+	packet_print_addr("Address", data, 0x00);
 }
 
-static void update_uart_baud_rate_cmd(const void *data, uint8_t size)
+static void update_uart_baud_rate_cmd(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint16_t enc_rate = get_le16(data);
 	uint32_t exp_rate = get_le32(data + 2);
@@ -262,7 +250,8 @@ static void update_uart_baud_rate_cmd(const void *data, uint8_t size)
 	print_field("Explicit baud rate: %u Mbps", exp_rate);
 }
 
-static void write_sco_pcm_int_param_cmd(const void *data, uint8_t size)
+static void write_sco_pcm_int_param_cmd(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t routing = get_u8(data);
 	uint8_t rate = get_u8(data + 1);
@@ -277,7 +266,8 @@ static void write_sco_pcm_int_param_cmd(const void *data, uint8_t size)
 	print_clock_mode(clock_mode);
 }
 
-static void read_sco_pcm_int_param_rsp(const void *data, uint8_t size)
+static void read_sco_pcm_int_param_rsp(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t status = get_u8(data);
 	uint8_t routing = get_u8(data + 1);
@@ -294,7 +284,8 @@ static void read_sco_pcm_int_param_rsp(const void *data, uint8_t size)
 	print_clock_mode(clock_mode);
 }
 
-static void set_sleepmode_param_cmd(const void *data, uint8_t size)
+static void set_sleepmode_param_cmd(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t mode = get_u8(data);
 
@@ -303,7 +294,8 @@ static void set_sleepmode_param_cmd(const void *data, uint8_t size)
 	packet_hexdump(data + 1, size - 1);
 }
 
-static void read_sleepmode_param_rsp(const void *data, uint8_t size)
+static void read_sleepmode_param_rsp(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t status = get_u8(data);
 	uint8_t mode = get_u8(data + 1);
@@ -314,7 +306,8 @@ static void read_sleepmode_param_rsp(const void *data, uint8_t size)
 	packet_hexdump(data + 2, size - 2);
 }
 
-static void enable_radio_cmd(const void *data, uint8_t size)
+static void enable_radio_cmd(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t mode = get_u8(data);
 	const char *str;
@@ -334,7 +327,8 @@ static void enable_radio_cmd(const void *data, uint8_t size)
 	print_field("Mode: %s (0x%2.2x)", str, mode);
 }
 
-static void enable_usb_hid_emulation_cmd(const void *data, uint8_t size)
+static void enable_usb_hid_emulation_cmd(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t enable = get_u8(data);
 	const char *str;
@@ -354,7 +348,8 @@ static void enable_usb_hid_emulation_cmd(const void *data, uint8_t size)
 	print_field("Enable: %s (0x%2.2x)", str, enable);
 }
 
-static void read_uart_clock_setting_rsp(const void *data, uint8_t size)
+static void read_uart_clock_setting_rsp(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t status = get_u8(data);
 	uint8_t clock = get_u8(data + 1);
@@ -363,21 +358,22 @@ static void read_uart_clock_setting_rsp(const void *data, uint8_t size)
 	print_clock_setting(clock);
 }
 
-static void write_uart_clock_setting_cmd(const void *data, uint8_t size)
+static void write_uart_clock_setting_cmd(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t clock = get_u8(data);
 
 	print_clock_setting(clock);
 }
 
-static void read_raw_rssi_cmd(const void *data, uint8_t size)
+static void read_raw_rssi_cmd(uint16_t index, const void *data, uint8_t size)
 {
 	uint16_t handle = get_le16(data);
 
 	print_handle(handle);
 }
 
-static void read_raw_rssi_rsp(const void *data, uint8_t size)
+static void read_raw_rssi_rsp(uint16_t index, const void *data, uint8_t size)
 {
 	uint8_t status = get_u8(data);
 	uint16_t handle = get_le16(data + 1);
@@ -388,7 +384,7 @@ static void read_raw_rssi_rsp(const void *data, uint8_t size)
 	print_rssi(rssi);
 }
 
-static void write_ram_cmd(const void *data, uint8_t size)
+static void write_ram_cmd(uint16_t index, const void *data, uint8_t size)
 {
 	uint32_t addr = get_le32(data);
 
@@ -397,7 +393,7 @@ static void write_ram_cmd(const void *data, uint8_t size)
 	packet_hexdump(data + 4, size - 4);
 }
 
-static void read_ram_cmd(const void *data, uint8_t size)
+static void read_ram_cmd(uint16_t index, const void *data, uint8_t size)
 {
 	uint32_t addr = get_le32(data);
 	uint8_t length = get_u8(data + 4);
@@ -406,7 +402,7 @@ static void read_ram_cmd(const void *data, uint8_t size)
 	print_field("Length: %u", length);
 }
 
-static void read_ram_rsp(const void *data, uint8_t size)
+static void read_ram_rsp(uint16_t index, const void *data, uint8_t size)
 {
 	uint8_t status = get_u8(data);
 
@@ -415,14 +411,14 @@ static void read_ram_rsp(const void *data, uint8_t size)
 	packet_hexdump(data + 1, size - 1);
 }
 
-static void launch_ram_cmd(const void *data, uint8_t size)
+static void launch_ram_cmd(uint16_t index, const void *data, uint8_t size)
 {
 	uint32_t addr = get_le32(data);
 
 	print_field("Address: 0x%8.8x", addr);
 }
 
-static void read_vid_pid_rsp(const void *data, uint8_t size)
+static void read_vid_pid_rsp(uint16_t index, const void *data, uint8_t size)
 {
 	uint8_t status = get_u8(data);
 	uint16_t vid = get_le16(data + 1);
@@ -432,7 +428,8 @@ static void read_vid_pid_rsp(const void *data, uint8_t size)
 	print_field("Product: %4.4x:%4.4x", vid, pid);
 }
 
-static void write_high_priority_connection_cmd(const void *data, uint8_t size)
+static void write_high_priority_connection_cmd(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint16_t handle = get_le16(data);
 	uint8_t priority = get_u8(data + 2);
@@ -493,7 +490,8 @@ static void print_features(const uint8_t *features_array)
 						"(0x%16.16" PRIx64 ")", mask);
 }
 
-static void read_controller_features_rsp(const void *data, uint8_t size)
+static void read_controller_features_rsp(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t status = get_u8(data);
 
@@ -501,7 +499,8 @@ static void read_controller_features_rsp(const void *data, uint8_t size)
 	print_features(data + 1);
 }
 
-static void read_verbose_version_info_rsp(const void *data, uint8_t size)
+static void read_verbose_version_info_rsp(uint16_t index, const void *data,
+							uint8_t size)
 {
 	uint8_t status = get_u8(data);
 	uint8_t chip_id = get_u8(data + 1);
@@ -530,7 +529,7 @@ static void read_verbose_version_info_rsp(const void *data, uint8_t size)
 	print_field("Build number: %u (0x%4.4x)", build_num, build_num);
 }
 
-static void enable_wbs_cmd(const void *data, uint8_t size)
+static void enable_wbs_cmd(uint16_t index, const void *data, uint8_t size)
 {
 	uint8_t mode = get_u8(data);
 	uint16_t codec = get_le16(data + 1);
@@ -707,7 +706,14 @@ void broadcom_lm_diag(const void *data, uint8_t size)
 	}
 }
 
+static void lm_diag_evt(struct timeval *tv, uint16_t index,
+				const void *data, uint8_t size)
+{
+	broadcom_lm_diag(data, 63);
+}
+
 static const struct vendor_evt vendor_evt_table[] = {
+	{ 0xb4, "LM Diag", lm_diag_evt, 64, true },
 	{ }
 };
 

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -56,6 +43,15 @@ static const bt_uuid_t included_service_uuid = { .type = BT_UUID16,
 					.value.u16 = GATT_INCLUDE_UUID };
 static const bt_uuid_t ext_desc_uuid = { .type = BT_UUID16,
 				.value.u16 = GATT_CHARAC_EXT_PROPER_UUID };
+static const bt_uuid_t ccc_uuid = { .type = BT_UUID16,
+				.value.u16 = GATT_CLIENT_CHARAC_CFG_UUID };
+
+struct gatt_db_ccc {
+	gatt_db_read_t read_func;
+	gatt_db_write_t write_func;
+	gatt_db_notify_t notify_func;
+	void *user_data;
+};
 
 struct gatt_db {
 	int ref_count;
@@ -70,6 +66,8 @@ struct gatt_db {
 
 	gatt_db_authorize_cb_t authorize;
 	void *authorize_data;
+
+	struct gatt_db_ccc *ccc;
 };
 
 struct notify {
@@ -114,6 +112,7 @@ struct gatt_db_attribute {
 
 	gatt_db_read_t read_func;
 	gatt_db_write_t write_func;
+	gatt_db_notify_t notify_func;
 	void *user_data;
 
 	unsigned int read_id;
@@ -457,6 +456,7 @@ static void gatt_db_destroy(struct gatt_db *db)
 		timeout_remove(db->hash_id);
 
 	queue_destroy(db->services, gatt_db_service_destroy);
+	free(db->ccc);
 	free(db);
 }
 
@@ -709,21 +709,24 @@ struct gatt_db_attribute *gatt_db_insert_service(struct gatt_db *db,
 	if (service) {
 		const bt_uuid_t *type;
 		bt_uuid_t value;
+		struct gatt_db_attribute *attr = service->attributes[0];
+
+		if (!attr)
+			return NULL;
 
 		if (primary)
 			type = &primary_service_uuid;
 		else
 			type = &secondary_service_uuid;
 
-		gatt_db_attribute_get_service_uuid(service->attributes[0],
-									&value);
+		gatt_db_attribute_get_service_uuid(attr, &value);
 
 		/* Check if service match */
-		if (!bt_uuid_cmp(&service->attributes[0]->uuid, type) &&
+		if (!bt_uuid_cmp(&attr->uuid, type) &&
 				!bt_uuid_cmp(&value, uuid) &&
 				service->num_handles == num_handles &&
-				service->attributes[0]->handle == handle)
-			return service->attributes[0];
+				attr->handle == handle)
+			return attr;
 
 		return NULL;
 	}
@@ -1051,6 +1054,71 @@ gatt_db_service_add_descriptor(struct gatt_db_attribute *attrib,
 					user_data);
 }
 
+static void find_ccc_value(struct gatt_db_attribute *attrib, void *user_data)
+{
+	uint16_t *handle = user_data;
+
+	gatt_db_attribute_get_char_data(attrib, NULL, handle, NULL, NULL, NULL);
+}
+
+struct gatt_db_attribute *
+gatt_db_service_add_ccc(struct gatt_db_attribute *attrib, uint32_t permissions)
+{
+	struct gatt_db *db;
+	struct gatt_db_attribute *ccc;
+	struct gatt_db_attribute *value;
+	uint16_t handle = 0;
+
+	if (!attrib || !permissions)
+		return NULL;
+
+	db = attrib->service->db;
+
+	if (!db->ccc)
+		return NULL;
+
+	/* Locate value handle */
+	gatt_db_service_foreach_char(attrib, find_ccc_value, &handle);
+
+	if (!handle)
+		return NULL;
+
+	value = gatt_db_get_attribute(db, handle);
+	if (!value || value->notify_func)
+		return NULL;
+
+	ccc = service_insert_descriptor(attrib->service, 0, &ccc_uuid,
+					permissions,
+					db->ccc->read_func,
+					db->ccc->write_func,
+					db->ccc->user_data);
+	if (!ccc)
+		return ccc;
+
+	gatt_db_attribute_set_fixed_length(ccc, 2);
+	ccc->notify_func = db->ccc->notify_func;
+	value->notify_func = db->ccc->notify_func;
+
+	return ccc;
+}
+
+void gatt_db_ccc_register(struct gatt_db *db, gatt_db_read_t read_func,
+				gatt_db_write_t write_func,
+				gatt_db_notify_t notify_func,
+				void *user_data)
+{
+	if (!db)
+		return;
+
+	if (!db->ccc)
+		db->ccc = new0(struct gatt_db_ccc, 1);
+
+	db->ccc->read_func = read_func;
+	db->ccc->write_func = write_func;
+	db->ccc->notify_func = notify_func;
+	db->ccc->user_data = user_data;
+}
+
 static struct gatt_db_attribute *
 service_insert_included(struct gatt_db_service *service, uint16_t handle,
 					struct gatt_db_attribute *include)
@@ -1263,6 +1331,7 @@ unsigned int gatt_db_find_by_type_value(struct gatt_db *db,
 {
 	struct find_by_type_value_data data;
 
+	memset(&data, 0, sizeof(data));
 	data.func = func;
 	data.user_data = user_data;
 	data.value = value;
@@ -1361,9 +1430,9 @@ static void foreach_in_range(void *data, void *user_data)
 		return;
 
 	if (!foreach_data->attr) {
-		if (svc_start < foreach_data->start ||
-					svc_start > foreach_data->end)
+		if (svc_start < foreach_data->start)
 			return;
+
 		return foreach_service_in_range(data, user_data);
 	}
 
@@ -1463,32 +1532,71 @@ void gatt_db_service_foreach_char(struct gatt_db_attribute *attrib,
 	gatt_db_service_foreach(attrib, &characteristic_uuid, func, user_data);
 }
 
+static int gatt_db_attribute_get_index(const struct gatt_db_attribute *attrib)
+{
+	struct gatt_db_service *service;
+	int index;
+
+	if (!attrib)
+		return -1;
+
+	service = attrib->service;
+	for (index = 0; index < service->num_handles; index++) {
+		if (service->attributes[index] == attrib)
+			return index;
+	}
+
+	return -1;
+}
+
+struct gatt_db_attribute *
+gatt_db_attribute_get_value(struct gatt_db_attribute *attrib)
+{
+	struct gatt_db_service *service;
+	int index;
+
+	if (!attrib)
+		return NULL;
+
+	index = gatt_db_attribute_get_index(attrib);
+	if (index <= 0)
+		return NULL;
+
+	service = attrib->service;
+
+	if (!bt_uuid_cmp(&characteristic_uuid, &attrib->uuid))
+		return service->attributes[index + 1];
+	else if (!bt_uuid_cmp(&characteristic_uuid,
+				&service->attributes[index - 1]->uuid))
+		return service->attributes[index];
+
+	return gatt_db_attribute_get_value(service->attributes[index - 1]);
+}
+
 void gatt_db_service_foreach_desc(struct gatt_db_attribute *attrib,
 						gatt_db_attribute_cb_t func,
 						void *user_data)
 {
 	struct gatt_db_service *service;
 	struct gatt_db_attribute *attr;
+	int index;
 	uint16_t i;
 
 	if (!attrib || !func)
 		return;
 
-	/* Return if this attribute is not a characteristic declaration */
-	if (bt_uuid_cmp(&characteristic_uuid, &attrib->uuid))
+	attrib = gatt_db_attribute_get_value(attrib);
+	if (!attrib)
+		return;
+
+	index = gatt_db_attribute_get_index(attrib);
+	if (index < 0)
 		return;
 
 	service = attrib->service;
 
 	/* Start from the attribute following the value handle */
-	for (i = 0; i < service->num_handles; i++) {
-		if (service->attributes[i] == attrib) {
-			i += 2;
-			break;
-		}
-	}
-
-	for (; i < service->num_handles; i++) {
+	for (i = index + 1; i < service->num_handles; i++) {
 		attr = service->attributes[i];
 		if (!attr)
 			continue;
@@ -1602,6 +1710,15 @@ uint16_t gatt_db_attribute_get_handle(const struct gatt_db_attribute *attrib)
 		return 0;
 
 	return attrib->handle;
+}
+
+struct gatt_db_attribute *
+gatt_db_attribute_get_service(const struct gatt_db_attribute *attrib)
+{
+	if (!attrib)
+		return NULL;
+
+	return attrib->service->attributes[0];
 }
 
 bool gatt_db_attribute_get_service_uuid(const struct gatt_db_attribute *attrib,
@@ -1749,8 +1866,18 @@ bool gatt_db_attribute_get_char_data(const struct gatt_db_attribute *attrib,
 	if (!attrib)
 		return false;
 
-	if (bt_uuid_cmp(&characteristic_uuid, &attrib->uuid))
-		return false;
+	if (bt_uuid_cmp(&characteristic_uuid, &attrib->uuid)) {
+		int index;
+
+		/* Check if Characteristic Value was passed instead */
+		index = gatt_db_attribute_get_index(attrib);
+		if (index < 0)
+			return NULL;
+
+		attrib = attrib->service->attributes[index - 1];
+		if (bt_uuid_cmp(&characteristic_uuid, &attrib->uuid))
+			return false;
+	}
 
 	/*
 	 * Characteristic declaration value:
@@ -1849,6 +1976,38 @@ static uint8_t attribute_authorize(struct gatt_db_attribute *attrib,
 	return db->authorize(attrib, opcode, att, db->authorize_data);
 }
 
+bool gatt_db_attribute_set_fixed_length(struct gatt_db_attribute *attrib,
+						uint16_t len)
+{
+	struct gatt_db_service *service;
+
+	if (!attrib)
+		return false;
+
+	service = attrib->service;
+
+	/* Don't allow overwriting length of service attribute */
+	if (attrib->service->attributes[0] == attrib)
+		return false;
+
+	/* If attribute is a characteristic declaration ajust to its value */
+	if (!bt_uuid_cmp(&characteristic_uuid, &attrib->uuid)) {
+		int i;
+
+		/* Start from the attribute following the value handle */
+		for (i = 0; i < service->num_handles; i++) {
+			if (service->attributes[i] == attrib) {
+				attrib = service->attributes[i + 1];
+				break;
+			}
+		}
+	}
+
+	attrib->value_len = len;
+
+	return true;
+}
+
 bool gatt_db_attribute_read(struct gatt_db_attribute *attrib, uint16_t offset,
 				uint8_t opcode, struct bt_att *att,
 				gatt_db_attribute_read_t func, void *user_data)
@@ -1857,6 +2016,12 @@ bool gatt_db_attribute_read(struct gatt_db_attribute *attrib, uint16_t offset,
 
 	if (!attrib || !func)
 		return false;
+
+	/* Check boundaries if value_len is set */
+	if (attrib->value_len && offset > attrib->value_len) {
+		func(attrib, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0, user_data);
+		return true;
+	}
 
 	if (attrib->read_func) {
 		struct pending_read *p;
@@ -1880,12 +2045,6 @@ bool gatt_db_attribute_read(struct gatt_db_attribute *attrib, uint16_t offset,
 
 		attrib->read_func(attrib, p->id, offset, opcode, att,
 							attrib->user_data);
-		return true;
-	}
-
-	/* Check boundary if value is stored in the db */
-	if (offset > attrib->value_len) {
-		func(attrib, BT_ATT_ERROR_INVALID_OFFSET, NULL, 0, user_data);
 		return true;
 	}
 
@@ -1943,18 +2102,30 @@ bool gatt_db_attribute_write(struct gatt_db_attribute *attrib, uint16_t offset,
 					gatt_db_attribute_write_t func,
 					void *user_data)
 {
-	if (!attrib || !func)
+	uint8_t err = 0;
+
+	if (!attrib || (!func && attrib->write_func))
 		return false;
 
 	if (attrib->write_func) {
 		struct pending_write *p;
-		uint8_t err;
+
+		/* Check boundaries if value_len is set */
+		if (attrib->value_len) {
+			if (offset > attrib->value_len) {
+				err = BT_ATT_ERROR_INVALID_OFFSET;
+				goto done;
+			}
+
+			if (offset + len > attrib->value_len) {
+				err = BT_ATT_ERROR_INVALID_ATTRIBUTE_VALUE_LEN;
+				goto done;
+			}
+		}
 
 		err = attribute_authorize(attrib, opcode, att);
-		if (err) {
-			func(attrib, err, user_data);
-			return true;
-		}
+		if (err)
+			goto done;
 
 		p = new0(struct pending_write, 1);
 		p->attrib = attrib;
@@ -1996,7 +2167,8 @@ bool gatt_db_attribute_write(struct gatt_db_attribute *attrib, uint16_t offset,
 	memcpy(&attrib->value[offset], value, len);
 
 done:
-	func(attrib, 0, user_data);
+	if (func)
+		func(attrib, err, user_data);
 
 	return true;
 }
@@ -2015,6 +2187,54 @@ bool gatt_db_attribute_write_result(struct gatt_db_attribute *attrib,
 		return false;
 
 	pending_write_result(p, err);
+
+	return true;
+}
+
+static void find_ccc(struct gatt_db_attribute *attrib, void *user_data)
+{
+	struct gatt_db_attribute **ccc = user_data;
+
+	if (*ccc)
+		return;
+
+	if (bt_uuid_cmp(&ccc_uuid, &attrib->uuid))
+		return;
+
+	*ccc = attrib;
+}
+
+struct gatt_db_attribute *
+gatt_db_attribute_get_ccc(struct gatt_db_attribute *attrib)
+{
+	struct gatt_db_attribute *ccc = NULL;
+
+	if (!attrib)
+		return NULL;
+
+	gatt_db_service_foreach_desc(attrib, find_ccc, &ccc);
+
+	return ccc;
+}
+
+bool gatt_db_attribute_notify(struct gatt_db_attribute *attrib,
+					const uint8_t *value, size_t len,
+					struct bt_att *att)
+{
+	struct gatt_db_attribute *ccc;
+
+	if (!attrib || !attrib->notify_func)
+		return false;
+
+	attrib = gatt_db_attribute_get_value(attrib);
+	if (!attrib)
+		return false;
+
+	ccc = gatt_db_attribute_get_ccc(attrib);
+	if (!ccc)
+		return false;
+
+	attrib->notify_func(attrib, ccc, value, len, att, ccc->user_data);
 
 	return true;
 }

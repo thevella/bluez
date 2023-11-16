@@ -1,17 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
 /*
  * Copyright (C) 2014 Intel Corporation
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
  *
  */
 
@@ -1264,7 +1253,8 @@ static bt_property_t *copy_properties(int num_properties,
 	for (i = 0; i < num_properties; i++) {
 		props[i].type = properties[i].type;
 		props[i].len = properties[i].len;
-		props[i].val = g_memdup(properties[i].val, properties[i].len);
+		props[i].val = util_memdup(properties[i].val,
+						properties[i].len);
 	}
 
 	return props;
@@ -1279,7 +1269,8 @@ static bt_property_t *repack_properties(int num_properties,
 	for (i = 0; i < num_properties; i++) {
 		props[i].type = properties[i]->type;
 		props[i].len = properties[i]->len;
-		props[i].val = g_memdup(properties[i]->val, properties[i]->len);
+		props[i].val = util_memdup(properties[i]->val,
+						properties[i]->len);
 	}
 
 	return props;
@@ -1292,7 +1283,7 @@ static bt_property_t *create_property(bt_property_type_t type, void *val,
 
 	prop->type = type;
 	prop->len = len;
-	prop->val = g_memdup(val, len);
+	prop->val = util_memdup(val, len);
 
 	return prop;
 }
@@ -1626,7 +1617,7 @@ static void gattc_search_result_cb(int conn_id, btgatt_srvc_id_t *srvc_id)
 
 	step->callback = CB_GATTC_SEARCH_RESULT;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.service = g_memdup(srvc_id, sizeof(*srvc_id));
+	step->callback_result.service = util_memdup(srvc_id, sizeof(*srvc_id));
 
 	schedule_callback_verification(step);
 }
@@ -1650,8 +1641,8 @@ static void gattc_get_characteristic_cb(int conn_id, int status,
 	step->callback = CB_GATTC_GET_CHARACTERISTIC;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.service = g_memdup(srvc_id, sizeof(*srvc_id));
-	step->callback_result.characteristic = g_memdup(char_id,
+	step->callback_result.service = util_memdup(srvc_id, sizeof(*srvc_id));
+	step->callback_result.characteristic = util_memdup(char_id,
 							sizeof(*char_id));
 	step->callback_result.char_prop = char_prop;
 
@@ -1667,10 +1658,10 @@ static void gattc_get_descriptor_cb(int conn_id, int status,
 	step->callback = CB_GATTC_GET_DESCRIPTOR;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.service = g_memdup(srvc_id, sizeof(*srvc_id));
-	step->callback_result.characteristic = g_memdup(char_id,
+	step->callback_result.service = util_memdup(srvc_id, sizeof(*srvc_id));
+	step->callback_result.characteristic = util_memdup(char_id,
 							sizeof(*char_id));
-	step->callback_result.descriptor = g_memdup(descr_id,
+	step->callback_result.descriptor = util_memdup(descr_id,
 							sizeof(*descr_id));
 
 	schedule_callback_verification(step);
@@ -1684,8 +1675,8 @@ static void gattc_get_included_service_cb(int conn_id, int status,
 	step->callback = CB_GATTC_GET_INCLUDED_SERVICE;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.service = g_memdup(srvc_id, sizeof(*srvc_id));
-	step->callback_result.included = g_memdup(incl_srvc_id,
+	step->callback_result.service = util_memdup(srvc_id, sizeof(*srvc_id));
+	step->callback_result.included = util_memdup(incl_srvc_id,
 							sizeof(*srvc_id));
 
 	schedule_callback_verification(step);
@@ -1699,7 +1690,8 @@ static void gattc_read_characteristic_cb(int conn_id, int status,
 	step->callback = CB_GATTC_READ_CHARACTERISTIC;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.read_params = g_memdup(p_data, sizeof(*p_data));
+	step->callback_result.read_params = util_memdup(p_data,
+							sizeof(*p_data));
 
 	schedule_callback_verification(step);
 }
@@ -1712,7 +1704,8 @@ static void gattc_read_descriptor_cb(int conn_id, int status,
 	step->callback = CB_GATTC_READ_DESCRIPTOR;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.read_params = g_memdup(p_data, sizeof(*p_data));
+	step->callback_result.read_params = util_memdup(p_data,
+							sizeof(*p_data));
 
 	schedule_callback_verification(step);
 }
@@ -1725,7 +1718,8 @@ static void gattc_write_characteristic_cb(int conn_id, int status,
 	step->callback = CB_GATTC_WRITE_CHARACTERISTIC;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.write_params = g_memdup(p_data, sizeof(*p_data));
+	step->callback_result.write_params = util_memdup(p_data,
+							sizeof(*p_data));
 
 	schedule_callback_verification(step);
 }
@@ -1738,7 +1732,8 @@ static void gattc_write_descriptor_cb(int conn_id, int status,
 	step->callback = CB_GATTC_WRITE_DESCRIPTOR;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.write_params = g_memdup(p_data, sizeof(*p_data));
+	step->callback_result.write_params = util_memdup(p_data,
+							sizeof(*p_data));
 
 	schedule_callback_verification(step);
 }
@@ -1753,8 +1748,8 @@ static void gattc_register_for_notification_cb(int conn_id, int registered,
 	step->callback = CB_GATTC_REGISTER_FOR_NOTIFICATION;
 	step->callback_result.status = status;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.service = g_memdup(srvc_id, sizeof(*srvc_id));
-	step->callback_result.characteristic = g_memdup(char_id,
+	step->callback_result.service = util_memdup(srvc_id, sizeof(*srvc_id));
+	step->callback_result.characteristic = util_memdup(char_id,
 							sizeof(*char_id));
 	step->callback_result.notification_registered = registered;
 
@@ -1767,7 +1762,8 @@ static void gattc_notif_cb(int conn_id, btgatt_notify_params_t *p_data)
 
 	step->callback = CB_GATTC_NOTIFY;
 	step->callback_result.conn_id = conn_id;
-	step->callback_result.notify_params = g_memdup(p_data, sizeof(*p_data));
+	step->callback_result.notify_params = util_memdup(p_data,
+							sizeof(*p_data));
 
 	schedule_callback_verification(step);
 }
@@ -1838,8 +1834,8 @@ static void gatts_service_added_cb(int status, int server_if,
 
 	step->callback_result.status = status;
 	step->callback_result.gatt_app_id = server_if;
-	step->callback_result.service = g_memdup(srvc_id, sizeof(*srvc_id));
-	step->callback_result.srvc_handle = g_memdup(&srvc_handle,
+	step->callback_result.service = util_memdup(srvc_id, sizeof(*srvc_id));
+	step->callback_result.srvc_handle = util_memdup(&srvc_handle,
 							sizeof(srvc_handle));
 
 	schedule_callback_verification(step);
@@ -1855,9 +1851,9 @@ static void gatts_included_service_added_cb(int status, int server_if,
 
 	step->callback_result.status = status;
 	step->callback_result.gatt_app_id = server_if;
-	step->callback_result.srvc_handle = g_memdup(&srvc_handle,
+	step->callback_result.srvc_handle = util_memdup(&srvc_handle,
 							sizeof(srvc_handle));
-	step->callback_result.inc_srvc_handle = g_memdup(&inc_srvc_handle,
+	step->callback_result.inc_srvc_handle = util_memdup(&inc_srvc_handle,
 						sizeof(inc_srvc_handle));
 
 	schedule_callback_verification(step);
@@ -1874,10 +1870,10 @@ static void gatts_characteristic_added_cb(int status, int server_if,
 
 	step->callback_result.status = status;
 	step->callback_result.gatt_app_id = server_if;
-	step->callback_result.srvc_handle = g_memdup(&srvc_handle,
+	step->callback_result.srvc_handle = util_memdup(&srvc_handle,
 							sizeof(srvc_handle));
-	step->callback_result.uuid = g_memdup(uuid, sizeof(*uuid));
-	step->callback_result.char_handle = g_memdup(&char_handle,
+	step->callback_result.uuid = util_memdup(uuid, sizeof(*uuid));
+	step->callback_result.char_handle = util_memdup(&char_handle,
 							sizeof(char_handle));
 
 	schedule_callback_verification(step);
@@ -1894,10 +1890,10 @@ static void gatts_descriptor_added_cb(int status, int server_if,
 
 	step->callback_result.status = status;
 	step->callback_result.gatt_app_id = server_if;
-	step->callback_result.srvc_handle = g_memdup(&srvc_handle,
+	step->callback_result.srvc_handle = util_memdup(&srvc_handle,
 							sizeof(srvc_handle));
-	step->callback_result.uuid = g_memdup(uuid, sizeof(*uuid));
-	step->callback_result.desc_handle = g_memdup(&desc_handle,
+	step->callback_result.uuid = util_memdup(uuid, sizeof(*uuid));
+	step->callback_result.desc_handle = util_memdup(&desc_handle,
 							sizeof(desc_handle));
 
 	schedule_callback_verification(step);
@@ -1911,7 +1907,7 @@ static void gatts_service_started_cb(int status, int server_if, int srvc_handle)
 
 	step->callback_result.status = status;
 	step->callback_result.gatt_app_id = server_if;
-	step->callback_result.srvc_handle = g_memdup(&srvc_handle,
+	step->callback_result.srvc_handle = util_memdup(&srvc_handle,
 							sizeof(srvc_handle));
 
 	schedule_callback_verification(step);
@@ -1925,7 +1921,7 @@ static void gatts_service_stopped_cb(int status, int server_if, int srvc_handle)
 
 	step->callback_result.status = status;
 	step->callback_result.gatt_app_id = server_if;
-	step->callback_result.srvc_handle = g_memdup(&srvc_handle,
+	step->callback_result.srvc_handle = util_memdup(&srvc_handle,
 							sizeof(srvc_handle));
 
 	schedule_callback_verification(step);
@@ -1939,7 +1935,7 @@ static void gatts_service_deleted_cb(int status, int server_if, int srvc_handle)
 
 	step->callback_result.status = status;
 	step->callback_result.gatt_app_id = server_if;
-	step->callback_result.srvc_handle = g_memdup(&srvc_handle,
+	step->callback_result.srvc_handle = util_memdup(&srvc_handle,
 							sizeof(srvc_handle));
 
 	schedule_callback_verification(step);
@@ -1956,7 +1952,7 @@ static void gatts_request_read_cb(int conn_id, int trans_id, bt_bdaddr_t *bda,
 
 	step->callback_result.conn_id = conn_id;
 	step->callback_result.trans_id = trans_id;
-	step->callback_result.attr_handle = g_memdup(&attr_handle,
+	step->callback_result.attr_handle = util_memdup(&attr_handle,
 							sizeof(attr_handle));
 	step->callback_result.offset = offset;
 	step->callback_result.is_long = is_long;
@@ -1985,13 +1981,13 @@ static void gatts_request_write_cb(int conn_id, int trans_id, bt_bdaddr_t *bda,
 
 	step->callback_result.conn_id = conn_id;
 	step->callback_result.trans_id = trans_id;
-	step->callback_result.attr_handle = g_memdup(&attr_handle,
+	step->callback_result.attr_handle = util_memdup(&attr_handle,
 							sizeof(attr_handle));
 	step->callback_result.offset = offset;
 	step->callback_result.length = length;
 	step->callback_result.need_rsp = need_rsp;
 	step->callback_result.is_prep = is_prep;
-	step->callback_result.value = g_memdup(&value, length);
+	step->callback_result.value = util_memdup(&value, length);
 
 	/* Utilize property verification mechanism for bdaddr */
 	props[0] = create_property(BT_PROPERTY_BDADDR, bda, sizeof(*bda));
@@ -2180,7 +2176,7 @@ static btmce_mas_instance_t *copy_mas_instances(int num_instances,
 		inst[i].id = instances[i].id;
 		inst[i].scn = instances[i].scn;
 		inst[i].msg_types = instances[i].msg_types;
-		inst[i].p_name = g_memdup(instances[i].p_name,
+		inst[i].p_name = util_memdup(instances[i].p_name,
 						strlen(instances[i].p_name));
 	}
 
@@ -2797,7 +2793,7 @@ void emu_remote_connect_hci_action(void)
 	struct step *step = g_new0(struct step, 1);
 	const uint8_t *master_addr;
 
-	master_addr = hciemu_get_master_bdaddr(data->hciemu);
+	master_addr = hciemu_get_central_bdaddr(data->hciemu);
 
 	tester_print("Trying to connect hci");
 

@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2012  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -762,8 +749,38 @@ void btd_profile_foreach(void (*func)(struct btd_profile *p, void *data),
 	}
 }
 
+static struct btd_profile *btd_profile_find_uuid(const char *uuid)
+{
+	GSList *l, *next;
+
+	for (l = profiles; l != NULL; l = next) {
+		struct btd_profile *p = l->data;
+
+		if (!g_strcmp0(p->local_uuid, uuid))
+			return p;
+		next = g_slist_next(l);
+	}
+
+	for (l = ext_profiles; l != NULL; l = next) {
+		struct ext_profile *ext = l->data;
+		struct btd_profile *p = &ext->p;
+
+		if (!g_strcmp0(p->local_uuid, uuid))
+			return p;
+		next = g_slist_next(l);
+	}
+
+	return NULL;
+}
+
 int btd_profile_register(struct btd_profile *profile)
 {
+	if (profile->experimental && !(g_dbus_get_flags() &
+					G_DBUS_FLAG_ENABLE_EXPERIMENTAL)) {
+		DBG("D-Bus experimental not enabled");
+		return -ENOTSUP;
+	}
+
 	profiles = g_slist_append(profiles, profile);
 	return 0;
 }
@@ -1238,6 +1255,11 @@ static void ext_confirm(GIOChannel *io, gpointer user_data)
 
 	DBG("incoming connect from %s", addr);
 
+	if (!btd_adapter_is_uuid_allowed(adapter_find(&src), uuid)) {
+		info("UUID %s is not allowed. Igoring the connection", uuid);
+		return;
+	}
+
 	conn = create_conn(server, io, &src, &dst);
 	if (conn == NULL)
 		return;
@@ -1261,6 +1283,7 @@ static void ext_direct_connect(GIOChannel *io, GError *err, gpointer user_data)
 	struct ext_profile *ext = server->ext;
 	GError *gerr = NULL;
 	struct ext_io *conn;
+	const char *uuid = ext->service ? ext->service : ext->uuid;
 	bdaddr_t src, dst;
 
 	bt_io_get(io, &gerr,
@@ -1271,6 +1294,11 @@ static void ext_direct_connect(GIOChannel *io, GError *err, gpointer user_data)
 		error("%s failed to get connect data: %s", ext->name,
 								gerr->message);
 		g_error_free(gerr);
+		return;
+	}
+
+	if (!btd_adapter_is_uuid_allowed(adapter_find(&src), uuid)) {
+		info("UUID %s is not allowed. Igoring the connection", uuid);
 		return;
 	}
 
@@ -2453,6 +2481,12 @@ static DBusMessage *register_profile(DBusConnection *conn,
 
 	dbus_message_iter_get_basic(&args, &uuid);
 	dbus_message_iter_next(&args);
+
+	if (btd_profile_find_uuid(uuid)) {
+		warn("%s tried to register %s which is already registered",
+								sender, uuid);
+		return btd_error_not_permitted(msg, "UUID already registered");
+	}
 
 	if (dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY)
 		return btd_error_invalid_args(msg);

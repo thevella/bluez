@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011-2014  Intel Corporation
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -164,19 +151,19 @@ static void open_pty(struct serial *serial)
 
 	serial->fd = posix_openpt(O_RDWR | O_NOCTTY);
 	if (serial->fd < 0) {
-		perror("Failed to get master pseudo terminal");
+		perror("Failed to get central pseudo terminal");
 		return;
 	}
 
 	if (grantpt(serial->fd) < 0) {
-		perror("Failed to grant slave pseudo terminal");
+		perror("Failed to grant peripheral pseudo terminal");
 		close(serial->fd);
 		serial->fd = -1;
 		return;
 	}
 
 	if (unlockpt(serial->fd) < 0) {
-		perror("Failed to unlock slave pseudo terminal");
+		perror("Failed to unlock peripheral pseudo terminal");
 		close(serial->fd);
 		serial->fd = -1;
 		return;

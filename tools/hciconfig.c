@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -6,20 +7,6 @@
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -46,7 +33,6 @@
 
 #include "src/textfile.h"
 #include "src/shared/util.h"
-#include "tools/csr.h"
 
 static struct hci_dev_info di;
 static int all;
@@ -94,7 +80,11 @@ static void print_pkt_type(struct hci_dev_info *di)
 
 static void print_link_policy(struct hci_dev_info *di)
 {
-	printf("\tLink policy: %s\n", hci_lptostr(di->link_policy));
+	char *str;
+
+	str = hci_lptostr(di->link_policy);
+	printf("\tLink policy: %s\n", str);
+	bt_free(str);
 }
 
 static void print_link_mode(struct hci_dev_info *di)
@@ -130,8 +120,8 @@ static void print_le_states(uint64_t states)
 		"Directed Advertising State",
 		"Passive Scanning State",
 		"Active Scanning State",
-		"Initiating State/Connection State in Master Role",
-		"Connection State in the Slave Role",
+		"Initiating State/Connection State in Central Role",
+		"Connection State in the Peripheral Role",
 		"Non-connectable Advertising State and Passive Scanning State combination",
 		"Scannable Advertising State and Passive Scanning State combination",
 		"Connectable Advertising State and Passive Scanning State combination",
@@ -142,17 +132,17 @@ static void print_le_states(uint64_t states)
 		"Directed Advertising State and Active Scanning State combination",
 		"Non-connectable Advertising State and Initiating State combination",
 		"Scannable Advertising State and Initiating State combination",
-		"Non-connectable Advertising State and Master Role combination",
-		"Scannable Advertising State and Master Role combination",
-		"Non-connectable Advertising State and Slave Role combination",
-		"Scannable Advertising State and Slave Role combination",
+		"Non-connectable Advertising State and Central Role combination",
+		"Scannable Advertising State and Central Role combination",
+		"Non-connectable Advertising State and Peripheral Role combination",
+		"Scannable Advertising State and Peripheral Role combination",
 		"Passive Scanning State and Initiating State combination",
 		"Active Scanning State and Initiating State combination",
-		"Passive Scanning State and Master Role combination",
-		"Active Scanning State and Master Role combination",
-		"Passive Scanning State and Slave Role combination",
-		"Active Scanning State and Slave Role combination",
-		"Initiating State and Master Role combination/Master Role and Master Role combination",
+		"Passive Scanning State and Central Role combination",
+		"Active Scanning State and Central Role combination",
+		"Passive Scanning State and Peripheral Role combination",
+		"Active Scanning State and Peripheral Role combination",
+		"Initiating State and Central Role combination/Central Role and Central Role combination",
 		NULL
 	};
 
@@ -1703,30 +1693,6 @@ static void print_rev_ericsson(int dd)
 	printf("\t%s\n", buf + 1);
 }
 
-static void print_rev_csr(int dd, uint16_t rev)
-{
-	uint16_t buildid, chipver, chiprev, maxkeylen, mapsco;
-
-	if (csr_read_varid_uint16(dd, 0, CSR_VARID_BUILDID, &buildid) < 0) {
-		printf("\t%s\n", csr_buildidtostr(rev));
-		return;
-	}
-
-	printf("\t%s\n", csr_buildidtostr(buildid));
-
-	if (!csr_read_varid_uint16(dd, 1, CSR_VARID_CHIPVER, &chipver)) {
-		if (csr_read_varid_uint16(dd, 2, CSR_VARID_CHIPREV, &chiprev) < 0)
-			chiprev = 0;
-		printf("\tChip version: %s\n", csr_chipvertostr(chipver, chiprev));
-	}
-
-	if (!csr_read_varid_uint16(dd, 3, CSR_VARID_MAX_CRYPT_KEY_LENGTH, &maxkeylen))
-		printf("\tMax key size: %d bit\n", maxkeylen * 8);
-
-	if (!csr_read_pskey_uint16(dd, 4, CSR_PSKEY_HOSTIO_MAP_SCO_PCM, 0x0000, &mapsco))
-		printf("\tSCO mapping:  %s\n", mapsco ? "PCM" : "HCI");
-}
-
 static void print_rev_digianswer(int dd)
 {
 	struct hci_request rq;
@@ -1788,9 +1754,6 @@ static void cmd_revision(int ctl, int hdev, char *opt)
 	case 37:
 	case 48:
 		print_rev_ericsson(dd);
-		break;
-	case 10:
-		print_rev_csr(dd, ver.hci_rev);
 		break;
 	case 12:
 		print_rev_digianswer(dd);
@@ -1927,50 +1890,92 @@ static struct {
 	char *opt;
 	char *doc;
 } command[] = {
-	{ "up",		cmd_up,		0,		"Open and initialize HCI device" },
-	{ "down",	cmd_down,	0,		"Close HCI device" },
-	{ "reset",	cmd_reset,	0,		"Reset HCI device" },
-	{ "rstat",	cmd_rstat,	0,		"Reset statistic counters" },
-	{ "auth",	cmd_auth,	0,		"Enable Authentication" },
-	{ "noauth",	cmd_auth,	0,		"Disable Authentication" },
-	{ "encrypt",	cmd_encrypt,	0,		"Enable Encryption" },
-	{ "noencrypt",	cmd_encrypt,	0,		"Disable Encryption" },
-	{ "piscan",	cmd_scan,	0,		"Enable Page and Inquiry scan" },
-	{ "noscan",	cmd_scan,	0,		"Disable scan" },
-	{ "iscan",	cmd_scan,	0,		"Enable Inquiry scan" },
-	{ "pscan",	cmd_scan,	0,		"Enable Page scan" },
-	{ "ptype",	cmd_ptype,	"[type]",	"Get/Set default packet type" },
-	{ "lm",		cmd_lm,		"[mode]",	"Get/Set default link mode"   },
-	{ "lp",		cmd_lp,		"[policy]",	"Get/Set default link policy" },
-	{ "name",	cmd_name,	"[name]",	"Get/Set local name" },
-	{ "class",	cmd_class,	"[class]",	"Get/Set class of device" },
-	{ "voice",	cmd_voice,	"[voice]",	"Get/Set voice setting" },
-	{ "iac",	cmd_iac,	"[iac]",	"Get/Set inquiry access code" },
-	{ "inqtpl",	cmd_inq_tpl,	"[level]",	"Get/Set inquiry transmit power level" },
-	{ "inqmode",	cmd_inq_mode,	"[mode]",	"Get/Set inquiry mode" },
-	{ "inqdata",	cmd_inq_data,	"[data]",	"Get/Set inquiry data" },
-	{ "inqtype",	cmd_inq_type,	"[type]",	"Get/Set inquiry scan type" },
-	{ "inqparms",	cmd_inq_parms,	"[win:int]",	"Get/Set inquiry scan window and interval" },
-	{ "pageparms",	cmd_page_parms,	"[win:int]",	"Get/Set page scan window and interval" },
-	{ "pageto",	cmd_page_to,	"[to]",		"Get/Set page timeout" },
-	{ "afhmode",	cmd_afh_mode,	"[mode]",	"Get/Set AFH mode" },
-	{ "sspmode",	cmd_ssp_mode,	"[mode]",	"Get/Set Simple Pairing Mode" },
-	{ "aclmtu",	cmd_aclmtu,	"<mtu:pkt>",	"Set ACL MTU and number of packets" },
-	{ "scomtu",	cmd_scomtu,	"<mtu:pkt>",	"Set SCO MTU and number of packets" },
-	{ "delkey",	cmd_delkey,	"<bdaddr>",	"Delete link key from the device" },
-	{ "oobdata",	cmd_oob_data,	0,		"Get local OOB data" },
-	{ "commands",	cmd_commands,	0,		"Display supported commands" },
-	{ "features",	cmd_features,	0,		"Display device features" },
-	{ "version",	cmd_version,	0,		"Display version information" },
-	{ "revision",	cmd_revision,	0,		"Display revision information" },
-	{ "block",	cmd_block,	"<bdaddr>",	"Add a device to the blacklist" },
-	{ "unblock",	cmd_unblock,	"<bdaddr>",	"Remove a device from the blacklist" },
-	{ "lerandaddr", cmd_le_addr,	"<bdaddr>",	"Set LE Random Address" },
-	{ "leadv",	cmd_le_adv,	"[type]",	"Enable LE advertising"
+	{ "up",		cmd_up,		0,
+		"Open and initialize HCI device" },
+	{ "down",	cmd_down,	0,
+		"Close HCI device" },
+	{ "reset",	cmd_reset,	0,
+		"Reset HCI device" },
+	{ "rstat",	cmd_rstat,	0,
+		"Reset statistic counters" },
+	{ "auth",	cmd_auth,	0,
+		"Enable Authentication" },
+	{ "noauth",	cmd_auth,	0,
+		"Disable Authentication" },
+	{ "encrypt",	cmd_encrypt,	0,
+		"Enable Encryption" },
+	{ "noencrypt",	cmd_encrypt,	0,
+		"Disable Encryption" },
+	{ "piscan",	cmd_scan,	0,
+		"Enable Page and Inquiry scan" },
+	{ "noscan",	cmd_scan,	0,
+		"Disable scan" },
+	{ "iscan",	cmd_scan,	0,
+		"Enable Inquiry scan" },
+	{ "pscan",	cmd_scan,	0,
+		"Enable Page scan" },
+	{ "ptype",	cmd_ptype,	"[type]",
+		"Get/Set default packet type" },
+	{ "lm",		cmd_lm,		"[mode]",
+		"Get/Set default link mode"   },
+	{ "lp",		cmd_lp,		"[policy]",
+		"Get/Set default link policy" },
+	{ "name",	cmd_name,	"[name]",
+		"Get/Set local name" },
+	{ "class",	cmd_class,	"[class]",
+		"Get/Set class of device" },
+	{ "voice",	cmd_voice,	"[voice]",
+		"Get/Set voice setting" },
+	{ "iac",	cmd_iac,	"[iac]",
+		"Get/Set inquiry access code" },
+	{ "inqtpl",	cmd_inq_tpl,	"[level]",
+		"Get/Set inquiry transmit power level" },
+	{ "inqmode",	cmd_inq_mode,	"[mode]",
+		"Get/Set inquiry mode" },
+	{ "inqdata",	cmd_inq_data,	"[data]",
+		"Get/Set inquiry data" },
+	{ "inqtype",	cmd_inq_type,	"[type]",
+		"Get/Set inquiry scan type" },
+	{ "inqparms",	cmd_inq_parms,	"[win:int]",
+		"Get/Set inquiry scan window and interval" },
+	{ "pageparms",	cmd_page_parms,	"[win:int]",
+		"Get/Set page scan window and interval" },
+	{ "pageto",	cmd_page_to,	"[to]",
+		"Get/Set page timeout" },
+	{ "afhmode",	cmd_afh_mode,	"[mode]",
+		"Get/Set AFH mode" },
+	{ "sspmode",	cmd_ssp_mode,	"[mode]",
+		"Get/Set Simple Pairing Mode" },
+	{ "aclmtu",	cmd_aclmtu,	"<mtu:pkt>",
+		"Set ACL MTU and number of packets" },
+	{ "scomtu",	cmd_scomtu,	"<mtu:pkt>",
+		"Set SCO MTU and number of packets" },
+	{ "delkey",	cmd_delkey,	"<bdaddr>",
+		"Delete link key from the device" },
+	{ "oobdata",	cmd_oob_data,	0,
+		"Get local OOB data" },
+	{ "commands",	cmd_commands,	0,
+		"Display supported commands" },
+	{ "features",	cmd_features,	0,
+		"Display device features" },
+	{ "version",	cmd_version,	0,
+		"Display version information" },
+	{ "revision",	cmd_revision,	0,
+		"Display revision information" },
+	{ "block",	cmd_block,	"<bdaddr>",
+		"Add a device to the reject list" },
+	{ "unblock",	cmd_unblock,	"<bdaddr>",
+		"Remove a device from the reject list" },
+	{ "lerandaddr", cmd_le_addr,	"<bdaddr>",
+		"Set LE Random Address" },
+	{ "leadv",	cmd_le_adv,	"[type]",
+		"Enable LE advertising"
 		"\n\t\t\t0 - Connectable undirected advertising (default)"
 		"\n\t\t\t3 - Non connectable undirected advertising"},
-	{ "noleadv",	cmd_no_le_adv,	0,		"Disable LE advertising" },
-	{ "lestates",	cmd_le_states,	0,		"Display the supported LE states" },
+	{ "noleadv",	cmd_no_le_adv,	0,
+			"Disable LE advertising" },
+	{ "lestates",	cmd_le_states,	0,
+			"Display the supported LE states" },
 	{ NULL, NULL, 0 }
 };
 

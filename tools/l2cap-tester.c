@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2013  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -28,6 +15,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <errno.h>
+#include <poll.h>
 #include <stdbool.h>
 
 #include <glib.h>
@@ -64,6 +52,7 @@ struct l2cap_data {
 	uint16_t cid;
 	uint8_t mode;
 	int expect_err;
+	int timeout;
 
 	uint8_t send_cmd_code;
 	const void *send_cmd;
@@ -94,11 +83,12 @@ struct l2cap_data {
 	bool server_not_advertising;
 	bool direct_advertising;
 	bool close_1;
+	bool defer;
 
 	bool shut_sock_wr;
 };
 
-static void mgmt_debug(const char *str, void *user_data)
+static void print_debug(const char *str, void *user_data)
 {
 	const char *prefix = user_data;
 
@@ -203,6 +193,9 @@ static void read_index_list_callback(uint8_t status, uint16_t length,
 		tester_pre_setup_failed();
 	}
 
+	if (tester_use_debug())
+		hciemu_set_debug(data->hciemu, print_debug, "hciemu: ", NULL);
+
 	tester_print("New hciemu instance created");
 }
 
@@ -218,7 +211,7 @@ static void test_pre_setup(const void *test_data)
 	}
 
 	if (tester_use_debug())
-		mgmt_set_debug(data->mgmt, mgmt_debug, "mgmt: ", NULL);
+		mgmt_set_debug(data->mgmt, print_debug, "mgmt: ", NULL);
 
 	mgmt_send(data->mgmt, MGMT_OP_READ_INDEX_LIST, MGMT_INDEX_NONE, 0, NULL,
 					read_index_list_callback, NULL, NULL);
@@ -277,6 +270,15 @@ static uint8_t pair_device_pin[] = { 0x30, 0x30, 0x30, 0x30 }; /* "0000" */
 static const struct l2cap_data client_connect_success_test = {
 	.client_psm = 0x1001,
 	.server_psm = 0x1001,
+};
+
+static const struct l2cap_data client_connect_close_test = {
+	.client_psm = 0x1001,
+};
+
+static const struct l2cap_data client_connect_timeout_test = {
+	.client_psm = 0x1001,
+	.timeout = 1
 };
 
 static const struct l2cap_data client_connect_ssp_success_test_1 = {
@@ -446,6 +448,15 @@ static const struct l2cap_data le_client_connect_success_test_1 = {
 	.server_psm = 0x0080,
 };
 
+static const struct l2cap_data le_client_connect_close_test_1 = {
+	.client_psm = 0x0080,
+};
+
+static const struct l2cap_data le_client_connect_timeout_test_1 = {
+	.client_psm = 0x0080,
+	.timeout = 1,
+};
+
 static const struct l2cap_data le_client_connect_adv_success_test_1 = {
 	.client_psm = 0x0080,
 	.server_psm = 0x0080,
@@ -511,8 +522,8 @@ static const uint8_t le_connect_req[] = {	0x80, 0x00, /* PSM */
 
 static const uint8_t le_connect_rsp[] = {	0x40, 0x00, /* DCID */
 						0xa0, 0x02, /* MTU */
-						0xe6, 0x00, /* MPS */
-						0x0a, 0x00, /* Credits */
+						0xbc, 0x00, /* MPS */
+						0x04, 0x00, /* Credits */
 						0x00, 0x00, /* Result */
 };
 
@@ -550,6 +561,64 @@ static const struct l2cap_data le_server_nval_scid_test = {
 	.expect_cmd_len = sizeof(nval_le_connect_rsp),
 };
 
+static const uint8_t ecred_connect_req[] = {	0x80, 0x00, /* PSM */
+						0x40, 0x00, /* MTU */
+						0x40, 0x00, /* MPS */
+						0x05, 0x00, /* Credits */
+						0x41, 0x00, /* SCID #1 */
+						0x42, 0x00, /* SCID #2 */
+						0x43, 0x00, /* SCID #3 */
+						0x44, 0x00, /* SCID #4 */
+						0x45, 0x00, /* SCID #5 */
+};
+
+static const uint8_t ecred_connect_rsp[] = {	0xa0, 0x02, /* MTU */
+						0xbc, 0x00, /* MPS */
+						0x04, 0x00, /* Credits */
+						0x00, 0x00, /* Result */
+						0x40, 0x00, /* DCID #1 */
+						0x41, 0x00, /* DCID #2 */
+						0x42, 0x00, /* DCID #3 */
+						0x43, 0x00, /* DCID #4 */
+						0x44, 0x00, /* DCID #5 */
+};
+
+static const struct l2cap_data ext_flowctl_server_success_test = {
+	.server_psm = 0x0080,
+	.send_cmd_code = BT_L2CAP_PDU_ECRED_CONN_REQ,
+	.send_cmd = ecred_connect_req,
+	.send_cmd_len = sizeof(ecred_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_ECRED_CONN_RSP,
+	.expect_cmd = ecred_connect_rsp,
+	.expect_cmd_len = sizeof(ecred_connect_rsp),
+};
+
+static const uint8_t nval_ecred_connect_req[] = {
+						0x80, 0x00, /* PSM */
+						0x40, 0x00, /* MTU */
+						0x40, 0x00, /* MPS */
+						0x05, 0x00, /* Credits */
+						0x01, 0x00, /* SCID #1 */
+};
+
+static const uint8_t nval_ecred_connect_rsp[] = {
+						0x00, 0x00, /* MTU */
+						0x00, 0x00, /* MPS */
+						0x00, 0x00, /* Credits */
+						0x09, 0x00, /* Result */
+						0x00, 0x00, /* DCID #1 */
+};
+
+static const struct l2cap_data ext_flowctl_server_nval_scid_test = {
+	.server_psm = 0x0080,
+	.send_cmd_code = BT_L2CAP_PDU_ECRED_CONN_REQ,
+	.send_cmd = nval_ecred_connect_req,
+	.send_cmd_len = sizeof(nval_ecred_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_ECRED_CONN_RSP,
+	.expect_cmd = nval_ecred_connect_rsp,
+	.expect_cmd_len = sizeof(nval_ecred_connect_rsp),
+};
+
 static const struct l2cap_data le_att_client_connect_success_test_1 = {
 	.cid = 0x0004,
 	.sec_level = BT_SECURITY_LOW,
@@ -559,10 +628,84 @@ static const struct l2cap_data le_att_server_success_test_1 = {
 	.cid = 0x0004,
 };
 
+static const struct l2cap_data le_eatt_client_connect_success_test_1 = {
+	.client_psm = 0x0027,
+	.server_psm = 0x0027,
+	.mode = BT_MODE_EXT_FLOWCTL,
+	.sec_level = BT_SECURITY_LOW,
+};
+
+static const uint8_t eatt_connect_req[] = {	0x27, 0x00, /* PSM */
+						0x40, 0x00, /* MTU */
+						0x40, 0x00, /* MPS */
+						0x05, 0x00, /* Credits */
+						0x41, 0x00, /* SCID #1 */
+};
+
+static const uint8_t eatt_connect_rsp[] = {	0xa0, 0x02, /* MTU */
+						0xbc, 0x00, /* MPS */
+						0x04, 0x00, /* Credits */
+						0x00, 0x00, /* Result */
+						0x40, 0x00, /* DCID #1 */
+};
+
+static const struct l2cap_data le_eatt_server_success_test_1 = {
+	.server_psm = 0x0027,
+	.mode = BT_MODE_EXT_FLOWCTL,
+	.send_cmd_code = BT_L2CAP_PDU_ECRED_CONN_REQ,
+	.send_cmd = eatt_connect_req,
+	.send_cmd_len = sizeof(eatt_connect_req),
+	.expect_cmd_code = BT_L2CAP_PDU_ECRED_CONN_RSP,
+	.expect_cmd = eatt_connect_rsp,
+	.expect_cmd_len = sizeof(eatt_connect_rsp),
+	.defer = true,
+};
+
+static const uint8_t eatt_reject_req[] = {	0x27, 0x00, /* PSM */
+						0x40, 0x00, /* MTU */
+						0x40, 0x00, /* MPS */
+						0x05, 0x00, /* Credits */
+						0x41, 0x00, /* SCID #1 */
+						0x42, 0x00, /* SCID #2 */
+						0x43, 0x00, /* SCID #3 */
+						0x44, 0x00, /* SCID #4 */
+						0x45, 0x00, /* SCID #5 */
+};
+
+static const uint8_t eatt_reject_rsp[] = {	0xa0, 0x02, /* MTU */
+						0xbc, 0x00, /* MPS */
+						0x04, 0x00, /* Credits */
+						0x06, 0x00, /* Result */
+};
+
+static const struct l2cap_data le_eatt_server_reject_test_1 = {
+	.server_psm = 0x0027,
+	.mode = BT_MODE_EXT_FLOWCTL,
+	.send_cmd_code = BT_L2CAP_PDU_ECRED_CONN_REQ,
+	.send_cmd = eatt_reject_req,
+	.send_cmd_len = sizeof(eatt_reject_req),
+	.expect_cmd_code = BT_L2CAP_PDU_ECRED_CONN_RSP,
+	.expect_cmd = eatt_reject_rsp,
+	.expect_cmd_len = sizeof(eatt_reject_rsp),
+	.defer = true,
+	.expect_err = -1,
+};
+
 static const struct l2cap_data ext_flowctl_client_connect_success_test_1 = {
 	.client_psm = 0x0080,
 	.server_psm = 0x0080,
 	.mode = BT_MODE_EXT_FLOWCTL,
+};
+
+static const struct l2cap_data ext_flowctl_client_connect_close_test_1 = {
+	.client_psm = 0x0080,
+	.mode = BT_MODE_EXT_FLOWCTL,
+};
+
+static const struct l2cap_data ext_flowctl_client_connect_timeout_test_1 = {
+	.client_psm = 0x0080,
+	.mode = BT_MODE_EXT_FLOWCTL,
+	.timeout = 1,
 };
 
 static const struct l2cap_data ext_flowctl_client_connect_adv_success_test_1 = {
@@ -666,6 +809,11 @@ static void setup_powered_client_callback(uint8_t status, uint16_t length,
 	}
 
 	tester_print("Controller powered on");
+
+	if (l2data && l2data->timeout) {
+		tester_setup_complete();
+		return;
+	}
 
 	bthost = hciemu_client_get_host(data->hciemu);
 	bthost_set_cmd_complete_cb(bthost, client_cmd_complete, user_data);
@@ -981,6 +1129,10 @@ static gboolean socket_closed_cb(GIOChannel *io, GIOCondition cond,
 {
 	struct test_data *data = tester_get_data();
 	const struct l2cap_data *l2data = data->test_data;
+	int err, sk_err, sk;
+	socklen_t len = sizeof(sk_err);
+
+	tester_print("Disconnected");
 
 	if (l2data->shut_sock_wr) {
 		/* if socket is closed using SHUT_WR, L2CAP disconnection
@@ -993,6 +1145,22 @@ static gboolean socket_closed_cb(GIOChannel *io, GIOCondition cond,
 			tester_test_failed();
 		}
 	}
+
+	data->io_id = 0;
+
+	sk = g_io_channel_unix_get_fd(io);
+
+	if (getsockopt(sk, SOL_SOCKET, SO_ERROR, &sk_err, &len) < 0)
+		err = -errno;
+	else
+		err = -sk_err;
+
+	if (!l2data->timeout && -err != l2data->expect_err) {
+		tester_print("err %d != %d expected_err", -err,
+						l2data->expect_err);
+		tester_test_failed();
+	} else
+		tester_test_passed();
 
 	return FALSE;
 }
@@ -1113,7 +1281,7 @@ static int create_l2cap_sock(struct test_data *data, uint16_t psm,
 				uint16_t cid, int sec_level, uint8_t mode)
 {
 	const struct l2cap_data *l2data = data->test_data;
-	const uint8_t *master_bdaddr;
+	const uint8_t *central_bdaddr;
 	struct sockaddr_l2 addr;
 	int sk, err;
 
@@ -1126,9 +1294,9 @@ static int create_l2cap_sock(struct test_data *data, uint16_t psm,
 		return err;
 	}
 
-	master_bdaddr = hciemu_get_master_bdaddr(data->hciemu);
-	if (!master_bdaddr) {
-		tester_warn("No master bdaddr");
+	central_bdaddr = hciemu_get_central_bdaddr(data->hciemu);
+	if (!central_bdaddr) {
+		tester_warn("No central bdaddr");
 		close(sk);
 		return -ENODEV;
 	}
@@ -1137,7 +1305,7 @@ static int create_l2cap_sock(struct test_data *data, uint16_t psm,
 	addr.l2_family = AF_BLUETOOTH;
 	addr.l2_psm = htobs(psm);
 	addr.l2_cid = htobs(cid);
-	bacpy(&addr.l2_bdaddr, (void *) master_bdaddr);
+	bacpy(&addr.l2_bdaddr, (void *) central_bdaddr);
 
 	if (l2data && l2data->addr_type_avail)
 		addr.l2_bdaddr_type = l2data->addr_type;
@@ -1311,7 +1479,7 @@ static void test_connect(const void *test_data)
 	}
 
 	if (l2data->direct_advertising)
-		hciemu_add_master_post_command_hook(data->hciemu,
+		hciemu_add_central_post_command_hook(data->hciemu,
 						direct_adv_cmd_complete, NULL);
 
 	sk = create_l2cap_sock(data, 0, l2data->cid, l2data->sec_level,
@@ -1339,6 +1507,82 @@ static void test_connect(const void *test_data)
 	g_io_channel_unref(io);
 
 	tester_print("Connect in progress");
+}
+
+static void test_connect_close(const void *test_data)
+{
+	struct test_data *data = tester_get_data();
+	const struct l2cap_data *l2data = data->test_data;
+	GIOChannel *io;
+	int sk;
+
+	sk = create_l2cap_sock(data, 0, l2data->cid, l2data->sec_level,
+							l2data->mode);
+	if (sk < 0) {
+		if (sk == -ENOPROTOOPT)
+			tester_test_abort();
+		else
+			tester_test_failed();
+		return;
+	}
+
+	if (connect_l2cap_sock(data, sk, l2data->client_psm,
+							l2data->cid) < 0) {
+		close(sk);
+		tester_test_failed();
+		return;
+	}
+
+	io = g_io_channel_unix_new(sk);
+	g_io_channel_set_close_on_unref(io, TRUE);
+	data->io_id = g_io_add_watch(io, G_IO_HUP, socket_closed_cb, NULL);
+	g_io_channel_unref(io);
+
+	shutdown(sk, SHUT_RDWR);
+}
+
+static void test_connect_timeout(const void *test_data)
+{
+	struct test_data *data = tester_get_data();
+	const struct l2cap_data *l2data = data->test_data;
+	GIOChannel *io;
+	int sk;
+	struct timeval sndto;
+	socklen_t len;
+
+	sk = create_l2cap_sock(data, 0, l2data->cid, l2data->sec_level,
+							l2data->mode);
+	if (sk < 0) {
+		if (sk == -ENOPROTOOPT)
+			tester_test_abort();
+		else
+			tester_test_failed();
+		return;
+	}
+
+	memset(&sndto, 0, sizeof(sndto));
+
+	sndto.tv_sec = l2data->timeout;
+	len = sizeof(sndto);
+	if (setsockopt(sk, SOL_SOCKET, SO_SNDTIMEO, &sndto, len) < 0) {
+		tester_print("Can't set SO_SNDTIMEO: %s (%d)", strerror(errno),
+								errno);
+		close(sk);
+		tester_test_failed();
+		return;
+	}
+
+	if (connect_l2cap_sock(data, sk, l2data->client_psm,
+							l2data->cid) < 0) {
+		close(sk);
+		tester_test_failed();
+		return;
+	}
+
+	io = g_io_channel_unix_new(sk);
+	g_io_channel_set_close_on_unref(io, TRUE);
+	data->io_id = g_io_add_watch(io, G_IO_HUP, socket_closed_cb, NULL);
+	g_io_channel_unref(io);
 }
 
 static void test_connect_reject(const void *test_data)
@@ -1429,7 +1673,7 @@ static gboolean test_close_socket_1_part_3(gpointer arg)
 		return FALSE;
 	}
 
-	if (hciemu_get_master_le_scan_enable(data->hciemu)) {
+	if (hciemu_get_central_le_scan_enable(data->hciemu)) {
 		tester_print("Delayed check whether scann is off failed");
 		tester_test_failed();
 		return FALSE;
@@ -1447,16 +1691,16 @@ static gboolean test_close_socket_1_part_2(gpointer args)
 	tester_print("Will close socket during scan phase...");
 
 	/* We tried to conect to LE device that is not advertising. It
-	 * was added to kernel whitelist, and scan was started. We
+	 * was added to kernel accept list, and scan was started. We
 	 * should be still scanning.
 	 */
-	if (!hciemu_get_master_le_scan_enable(data->hciemu)) {
+	if (!hciemu_get_central_le_scan_enable(data->hciemu)) {
 		tester_print("Error - should be still scanning");
 		tester_test_failed();
 		return FALSE;
 	}
 
-	/* Calling close() should remove device from  whitelist, and stop
+	/* Calling close() should remove device from  accept list, and stop
 	 * the scan.
 	 */
 	if (close(sk) < 0) {
@@ -1477,7 +1721,7 @@ static gboolean test_close_socket_2_part_3(gpointer arg)
 	int err;
 
 	/* Scan should be already over, we're trying to create connection */
-	if (hciemu_get_master_le_scan_enable(data->hciemu)) {
+	if (hciemu_get_central_le_scan_enable(data->hciemu)) {
 		tester_print("Error - should no longer scan");
 		tester_test_failed();
 		return FALSE;
@@ -1573,7 +1817,7 @@ static void test_close_socket(const void *test_data)
 	const struct l2cap_data *l2data = data->test_data;
 	const uint8_t *client_bdaddr;
 
-	hciemu_add_master_post_command_hook(data->hciemu,
+	hciemu_add_central_post_command_hook(data->hciemu,
 					test_close_socket_router, data);
 
 	if (l2data->client_bdaddr != NULL)
@@ -1678,7 +1922,7 @@ static void test_connect_2(const void *test_data)
 	test_2_connect_cb_cnt = 0;
 	test_scan_enable_counter = 0;
 
-	hciemu_add_master_post_command_hook(data->hciemu,
+	hciemu_add_central_post_command_hook(data->hciemu,
 				test_connect_2_router, data);
 
 	if (l2data->server_psm) {
@@ -1699,6 +1943,89 @@ static void test_connect_2(const void *test_data)
 								defer);
 }
 
+static gboolean l2cap_accept_cb(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	struct test_data *data = tester_get_data();
+	const struct l2cap_data *l2data = data->test_data;
+	int sk;
+
+	sk = g_io_channel_unix_get_fd(io);
+
+	if (!check_mtu(data, sk)) {
+		tester_test_failed();
+		return FALSE;
+	}
+
+	if (l2data->read_data) {
+		struct bthost *bthost;
+
+		bthost = hciemu_client_get_host(data->hciemu);
+		g_io_add_watch(io, G_IO_IN, server_received_data, NULL);
+		bthost_send_cid(bthost, data->handle, data->dcid,
+					l2data->read_data, l2data->data_len);
+
+		g_io_channel_unref(io);
+
+		return FALSE;
+	} else if (l2data->write_data) {
+		struct bthost *bthost;
+		ssize_t ret;
+
+		bthost = hciemu_client_get_host(data->hciemu);
+		bthost_add_cid_hook(bthost, data->handle, data->scid,
+					server_bthost_received_data, NULL);
+
+		ret = write(sk, l2data->write_data, l2data->data_len);
+
+		if (ret != l2data->data_len) {
+			tester_warn("Unable to write all data");
+			tester_test_failed();
+		}
+
+		return FALSE;
+	}
+
+	tester_print("Successfully connected");
+
+	tester_test_passed();
+
+	return FALSE;
+}
+
+static bool defer_accept(struct test_data *data, GIOChannel *io)
+{
+	int sk;
+	char c;
+	struct pollfd pfd;
+
+	sk = g_io_channel_unix_get_fd(io);
+
+	memset(&pfd, 0, sizeof(pfd));
+	pfd.fd = sk;
+	pfd.events = POLLOUT;
+
+	if (poll(&pfd, 1, 0) < 0) {
+		tester_warn("poll: %s (%d)", strerror(errno), errno);
+		return false;
+	}
+
+	if (!(pfd.revents & POLLOUT)) {
+		if (read(sk, &c, 1) < 0) {
+			tester_warn("read: %s (%d)", strerror(errno), errno);
+			return false;
+		}
+	}
+
+	data->io_id = g_io_add_watch(io, G_IO_OUT, l2cap_accept_cb, NULL);
+
+	g_io_channel_unref(io);
+
+	tester_print("Accept deferred setup");
+
+	return true;
+}
+
 static gboolean l2cap_listen_cb(GIOChannel *io, GIOCondition cond,
 							gpointer user_data)
 {
@@ -1717,52 +2044,23 @@ static gboolean l2cap_listen_cb(GIOChannel *io, GIOCondition cond,
 		return FALSE;
 	}
 
-	if (!check_mtu(data, new_sk)) {
-		tester_test_failed();
-		return FALSE;
-	}
+	io = g_io_channel_unix_new(new_sk);
+	g_io_channel_set_close_on_unref(io, TRUE);
 
-	if (l2data->read_data) {
-		struct bthost *bthost;
-		GIOChannel *new_io;
-
-		new_io = g_io_channel_unix_new(new_sk);
-		g_io_channel_set_close_on_unref(new_io, TRUE);
-
-		bthost = hciemu_client_get_host(data->hciemu);
-		g_io_add_watch(new_io, G_IO_IN, server_received_data, NULL);
-		bthost_send_cid(bthost, data->handle, data->dcid,
-					l2data->read_data, l2data->data_len);
-
-		g_io_channel_unref(new_io);
-
-		return FALSE;
-	} else if (l2data->write_data) {
-		struct bthost *bthost;
-		ssize_t ret;
-
-		bthost = hciemu_client_get_host(data->hciemu);
-		bthost_add_cid_hook(bthost, data->handle, data->scid,
-					server_bthost_received_data, NULL);
-
-		ret = write(new_sk, l2data->write_data, l2data->data_len);
-		close(new_sk);
-
-		if (ret != l2data->data_len) {
-			tester_warn("Unable to write all data");
-			tester_test_failed();
+	if (l2data->defer) {
+		if (l2data->expect_err < 0) {
+			g_io_channel_unref(io);
+			return FALSE;
 		}
 
+		if (!defer_accept(data, io)) {
+			tester_warn("Unable to accept deferred setup");
+			tester_test_failed();
+		}
 		return FALSE;
 	}
 
-	tester_print("Successfully connected");
-
-	close(new_sk);
-
-	tester_test_passed();
-
-	return FALSE;
+	return l2cap_accept_cb(io, cond, user_data);
 }
 
 static void client_l2cap_rsp(uint8_t code, const void *data, uint16_t len,
@@ -1776,7 +2074,7 @@ static void client_l2cap_rsp(uint8_t code, const void *data, uint16_t len,
 	if (code != l2data->expect_cmd_code) {
 		tester_warn("Unexpected L2CAP response code (expected 0x%02x)",
 						l2data->expect_cmd_code);
-		return;
+		goto failed;
 	}
 
 	if (code == BT_L2CAP_PDU_CONN_RSP) {
@@ -1846,18 +2144,29 @@ static void test_server(const void *test_data)
 {
 	struct test_data *data = tester_get_data();
 	const struct l2cap_data *l2data = data->test_data;
-	const uint8_t *master_bdaddr;
+	const uint8_t *central_bdaddr;
 	uint8_t addr_type;
 	struct bthost *bthost;
 	GIOChannel *io;
 	int sk;
 
 	if (l2data->server_psm || l2data->cid) {
+		int opt = 1;
+
 		sk = create_l2cap_sock(data, l2data->server_psm,
 					l2data->cid, l2data->sec_level,
 					l2data->mode);
 		if (sk < 0) {
 			tester_test_failed();
+			return;
+		}
+
+		if (l2data->defer && setsockopt(sk, SOL_BLUETOOTH,
+				BT_DEFER_SETUP, &opt, sizeof(opt)) < 0) {
+			tester_warn("Can't enable deferred setup: %s (%d)",
+						strerror(errno), errno);
+			tester_test_failed();
+			close(sk);
 			return;
 		}
 
@@ -1879,9 +2188,9 @@ static void test_server(const void *test_data)
 		tester_print("Listening for connections");
 	}
 
-	master_bdaddr = hciemu_get_master_bdaddr(data->hciemu);
-	if (!master_bdaddr) {
-		tester_warn("No master bdaddr");
+	central_bdaddr = hciemu_get_central_bdaddr(data->hciemu);
+	if (!central_bdaddr) {
+		tester_warn("No central bdaddr");
 		tester_test_failed();
 		return;
 	}
@@ -1894,7 +2203,7 @@ static void test_server(const void *test_data)
 	else
 		addr_type = BDADDR_LE_PUBLIC;
 
-	bthost_hci_connect(bthost, master_bdaddr, addr_type);
+	bthost_hci_connect(bthost, central_bdaddr, addr_type);
 }
 
 static void test_getpeername_not_connected(const void *test_data)
@@ -1943,6 +2252,15 @@ int main(int argc, char *argv[])
 	test_l2cap_bredr("L2CAP BR/EDR Client - Success",
 					&client_connect_success_test,
 					setup_powered_client, test_connect);
+
+	test_l2cap_bredr("L2CAP BR/EDR Client - Close",
+					&client_connect_close_test,
+					setup_powered_client,
+					test_connect_close);
+	test_l2cap_bredr("L2CAP BR/EDR Client - Timeout",
+					&client_connect_timeout_test,
+					setup_powered_client,
+					test_connect_timeout);
 
 	test_l2cap_bredr("L2CAP BR/EDR Client SSP - Success 1",
 					&client_connect_ssp_success_test_1,
@@ -2010,6 +2328,12 @@ int main(int argc, char *argv[])
 	test_l2cap_le("L2CAP LE Client - Success",
 				&le_client_connect_success_test_1,
 				setup_powered_client, test_connect);
+	test_l2cap_le("L2CAP LE Client - Close",
+				&le_client_connect_close_test_1,
+				setup_powered_client, test_connect_close);
+	test_l2cap_le("L2CAP LE Client - Timeout",
+				&le_client_connect_timeout_test_1,
+				setup_powered_client, test_connect_timeout);
 	test_l2cap_le("L2CAP LE Client, Direct Advertising - Success",
 				&le_client_connect_adv_success_test_1,
 				setup_powered_client, test_connect);
@@ -2055,6 +2379,12 @@ int main(int argc, char *argv[])
 	test_l2cap_le("L2CAP Ext-Flowctl Client - Success",
 				&ext_flowctl_client_connect_success_test_1,
 				setup_powered_client, test_connect);
+	test_l2cap_le("L2CAP Ext-Flowctl Client - Close",
+				&ext_flowctl_client_connect_close_test_1,
+				setup_powered_client, test_connect_close);
+	test_l2cap_le("L2CAP Ext-Flowctl Client - Timeout",
+				&ext_flowctl_client_connect_timeout_test_1,
+				setup_powered_client, test_connect_timeout);
 	test_l2cap_le("L2CAP Ext-Flowctl Client, Direct Advertising - Success",
 				&ext_flowctl_client_connect_adv_success_test_1,
 				setup_powered_client, test_connect);
@@ -2075,11 +2405,28 @@ int main(int argc, char *argv[])
 				setup_powered_client,
 				test_connect_2);
 
+	test_l2cap_le("L2CAP Ext-Flowctl Server - Success",
+				&ext_flowctl_server_success_test,
+				setup_powered_server, test_server);
+	test_l2cap_le("L2CAP Ext-Flowctl Server - Nval SCID",
+				&ext_flowctl_server_nval_scid_test,
+				setup_powered_server, test_server);
+
 	test_l2cap_le("L2CAP LE ATT Client - Success",
 				&le_att_client_connect_success_test_1,
 				setup_powered_client, test_connect);
 	test_l2cap_le("L2CAP LE ATT Server - Success",
 				&le_att_server_success_test_1,
+				setup_powered_server, test_server);
+
+	test_l2cap_le("L2CAP LE EATT Client - Success",
+				&le_eatt_client_connect_success_test_1,
+				setup_powered_client, test_connect);
+	test_l2cap_le("L2CAP LE EATT Server - Success",
+				&le_eatt_server_success_test_1,
+				setup_powered_server, test_server);
+	test_l2cap_le("L2CAP LE EATT Server - Reject",
+				&le_eatt_server_reject_test_1,
 				setup_powered_server, test_server);
 
 	return tester_run();

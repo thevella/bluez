@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -6,20 +7,6 @@
  *  Copyright (C) 2002-2003  Maxim Krasnyansky <maxk@qualcomm.com>
  *  Copyright (C) 2002-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -123,7 +110,7 @@ static int seq_start = 0;
 static const char *filename = NULL;
 
 static int rfcmode = 0;
-static int master = 0;
+static int central = 0;
 static int auth = 0;
 static int encr = 0;
 static int secure = 0;
@@ -167,6 +154,24 @@ static struct lookup_table bdaddr_types[] = {
 	{ "le_random",	BDADDR_LE_RANDOM	},
 	{ NULL,		0			},
 };
+
+static int bt_mode_to_l2cap_mode(int mode)
+{
+	switch (mode) {
+	case BT_MODE_BASIC:
+		return L2CAP_MODE_BASIC;
+	case BT_MODE_ERTM:
+		return L2CAP_MODE_ERTM;
+	case BT_MODE_STREAMING:
+		return L2CAP_MODE_STREAMING;
+	case BT_MODE_LE_FLOWCTL:
+		return L2CAP_MODE_LE_FLOWCTL;
+	case BT_MODE_EXT_FLOWCTL:
+		return L2CAP_MODE_FLOWCTL;
+	default:
+		return mode;
+	}
+}
 
 static int get_lookup_flag(struct lookup_table *table, char *name)
 {
@@ -300,9 +305,11 @@ static int getopts(int sk, struct l2cap_options *opts, bool connected)
 
 static int setopts(int sk, struct l2cap_options *opts)
 {
-	if (bdaddr_type == BDADDR_BREDR)
+	if (bdaddr_type == BDADDR_BREDR) {
+		opts->mode = bt_mode_to_l2cap_mode(opts->mode);
 		return setsockopt(sk, SOL_L2CAP, L2CAP_OPTIONS, opts,
 								sizeof(*opts));
+	}
 
 	if (opts->mode) {
 		if (setsockopt(sk, SOL_BLUETOOTH, BT_MODE, &opts->mode,
@@ -496,7 +503,7 @@ static int do_connect(char *svr)
 	opt = 0;
 	if (reliable)
 		opt |= L2CAP_LM_RELIABLE;
-	if (master)
+	if (central)
 		opt |= L2CAP_LM_MASTER;
 	if (auth)
 		opt |= L2CAP_LM_AUTH;
@@ -599,7 +606,7 @@ static void do_listen(void (*handler)(int sk))
 	opt = 0;
 	if (reliable)
 		opt |= L2CAP_LM_RELIABLE;
-	if (master)
+	if (central)
 		opt |= L2CAP_LM_MASTER;
 	if (auth)
 		opt |= L2CAP_LM_AUTH;
@@ -906,8 +913,9 @@ static void recv_mode(int sk)
 					timestamp = 0;
 					memset(ts, 0, sizeof(ts));
 				} else {
-					sprintf(ts, "[%ld.%ld] ",
-							tv.tv_sec, tv.tv_usec);
+					sprintf(ts, "[%lld.%lld] ",
+							(long long)tv.tv_sec,
+							(long long)tv.tv_usec);
 				}
 			}
 
@@ -1336,7 +1344,7 @@ static void usage(void)
 		"\t[-A] request authentication\n"
 		"\t[-E] request encryption\n"
 		"\t[-S] secure connection\n"
-		"\t[-M] become master\n"
+		"\t[-M] become central\n"
 		"\t[-T] enable timestamps\n"
 		"\t[-V type] address type (help for list, default = bredr)\n"
 		"\t[-e seq] initial sequence value (default = 0)\n");
@@ -1428,7 +1436,7 @@ int main(int argc, char *argv[])
 			break;
 
 		case 'P':
-			psm = atoi(optarg);
+			psm = strtoul(optarg, NULL, 0);
 			break;
 
 		case 'I':
@@ -1502,7 +1510,7 @@ int main(int argc, char *argv[])
 			break;
 
 		case 'M':
-			master = 1;
+			central = 1;
 			break;
 
 		case 'A':

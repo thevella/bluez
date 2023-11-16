@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2011-2012  Intel Corporation
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -128,7 +115,10 @@ static int create_rx_socket(void)
 	if (fd < 0)
 		return -1;
 
-	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+	if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+		close(fd);
+		return -1;
+	}
 
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
@@ -151,7 +141,10 @@ static int create_tx_socket(void)
 	if (fd < 0)
 		return -1;
 
-	setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+	if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt)) < 0) {
+		close(fd);
+		return -1;
+	}
 
 	return fd;
 }
@@ -180,8 +173,13 @@ struct bt_phy *bt_phy_new(void)
 	mainloop_add_fd(phy->rx_fd, EPOLLIN, phy_rx_callback, phy, NULL);
 
 	if (!get_random_bytes(&phy->id, sizeof(phy->id))) {
-		srandom(time(NULL));
-		phy->id = random();
+		if (util_getrandom(&phy->id, sizeof(phy->id), 0) < 0) {
+			mainloop_remove_fd(phy->rx_fd);
+			close(phy->tx_fd);
+			close(phy->rx_fd);
+			free(phy);
+			return NULL;
+		}
 	}
 
 	bt_phy_send(phy, BT_PHY_PKT_NULL, NULL, 0);

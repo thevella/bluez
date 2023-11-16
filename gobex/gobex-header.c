@@ -1,22 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  OBEX library with GLib integration
  *
  *  Copyright (C) 2011  Intel Corporation. All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -28,6 +15,7 @@
 
 #include "gobex-header.h"
 #include "gobex-debug.h"
+#include "src/shared/util.h"
 
 /* Header types */
 #define G_OBEX_HDR_ENC_UNICODE	(0 << 6)
@@ -235,7 +223,7 @@ GObexHeader *g_obex_header_decode(const void *data, gsize len,
 
 		switch (data_policy) {
 		case G_OBEX_DATA_COPY:
-			header->v.data = g_memdup(ptr, header->vlen);
+			header->v.data = util_memdup(ptr, header->vlen);
 			break;
 		case G_OBEX_DATA_REF:
 			header->extdata = TRUE;
@@ -295,7 +283,7 @@ void g_obex_header_free(GObexHeader *header)
 		break;
 	case G_OBEX_HDR_ENC_BYTES:
 		if (!header->extdata)
-			g_free(header->v.data);
+			free(header->v.data);
 		break;
 	case G_OBEX_HDR_ENC_UINT8:
 	case G_OBEX_HDR_ENC_UINT32:
@@ -423,7 +411,7 @@ GObexHeader *g_obex_header_new_bytes(guint8 id, const void *data, gsize len)
 	header->id = id;
 	header->vlen = len;
 	header->hlen = len + 3;
-	header->v.data = g_memdup(data, len);
+	header->v.data = util_memdup(data, len);
 
 	return header;
 }

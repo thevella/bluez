@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,20 +6,6 @@
  *  Copyright (C) 2010 GSyC/LibreSoft, Universidad Rey Juan Carlos.
  *  Copyright (C) 2010 Signove
  *  Copyright (C) 2014 Intel Corporation. All rights reserved.
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -39,6 +26,8 @@
 #include "bluetooth/l2cap.h"
 #include "btio/btio.h"
 #include "src/log.h"
+#include "src/shared/timeout.h"
+#include "src/shared/util.h"
 
 #include "mcap.h"
 
@@ -56,7 +45,7 @@
 
 #define RELEASE_TIMER(__mcl) do {		\
 	if (__mcl->tid) {			\
-		g_source_remove(__mcl->tid);	\
+		timeout_remove(__mcl->tid);	\
 		__mcl->tid = 0;			\
 	}					\
 } while(0)
@@ -64,15 +53,15 @@
 struct mcap_csp {
 	uint64_t	base_tmstamp;	/* CSP base timestamp */
 	struct timespec	base_time;	/* CSP base time when timestamp set */
-	guint		local_caps;	/* CSP-Master: have got remote caps */
-	guint		remote_caps;	/* CSP-Slave: remote master got caps */
-	guint		rem_req_acc;	/* CSP-Slave: accuracy required by master */
-	guint		ind_expected;	/* CSP-Master: indication expected */
-	uint8_t		csp_req;	/* CSP-Master: Request control flag */
-	guint		ind_timer;	/* CSP-Slave: indication timer */
-	guint		set_timer;	/* CSP-Slave: delayed set timer */
-	void		*set_data;	/* CSP-Slave: delayed set data */
-	void		*csp_priv_data;	/* CSP-Master: In-flight request data */
+	guint		local_caps;	/* CSP-Cent.: have got remote caps */
+	guint		remote_caps;	/* CSP-Perip: remote central got caps */
+	guint		rem_req_acc;	/* CSP-Perip: accuracy req by central */
+	guint		ind_expected;	/* CSP-Cent.: indication expected */
+	uint8_t		csp_req;	/* CSP-Cent.: Request control flag */
+	guint		ind_timer;	/* CSP-Perip: indication timer */
+	guint		set_timer;	/* CSP-Perip: delayed set timer */
+	void		*set_data;	/* CSP-Perip: delayed set data */
+	void		*csp_priv_data;	/* CSP-Cent.: In-flight request data */
 };
 
 struct mcap_sync_cap_cbdata {
@@ -496,7 +485,7 @@ static int compare_mdl(gconstpointer a, gconstpointer b)
 		return 1;
 }
 
-static gboolean wait_response_timer(gpointer data)
+static bool wait_response_timer(gpointer data)
 {
 	struct mcap_mcl *mcl = data;
 
@@ -562,8 +551,8 @@ gboolean mcap_create_mdl(struct mcap_mcl *mcl,
 
 	mcl->mdls = g_slist_insert_sorted(mcl->mdls, mcap_mdl_ref(mdl),
 								compare_mdl);
-	mcl->tid = g_timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
-									mcl);
+	mcl->tid = timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
+					mcl, NULL);
 	return TRUE;
 }
 
@@ -600,8 +589,8 @@ gboolean mcap_reconnect_mdl(struct mcap_mdl *mdl,
 	mcl->state = MCL_ACTIVE;
 	mcl->priv_data = con;
 
-	mcl->tid = g_timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
-									mcl);
+	mcl->tid = timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
+					mcl, NULL);
 	return TRUE;
 }
 
@@ -620,8 +609,8 @@ static gboolean send_delete_req(struct mcap_mcl *mcl,
 
 	mcl->priv_data = con;
 
-	mcl->tid = g_timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
-									mcl);
+	mcl->tid = timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
+					mcl, NULL);
 	return TRUE;
 }
 
@@ -731,8 +720,8 @@ gboolean mcap_mdl_abort(struct mcap_mdl *mdl, mcap_mdl_notify_cb abort_cb,
 	con->user_data = user_data;
 
 	mcl->priv_data = con;
-	mcl->tid = g_timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
-									mcl);
+	mcl->tid = timeout_add_seconds(RESPONSE_TIMER, wait_response_timer,
+					mcl, NULL);
 	return TRUE;
 }
 
@@ -1900,6 +1889,7 @@ gboolean mcap_create_mcl(struct mcap_instance *mi,
 {
 	struct mcap_mcl *mcl;
 	struct connect_mcl *con;
+	uint16_t val;
 
 	mcl = find_mcl(mi->mcls, addr);
 	if (mcl) {
@@ -1915,7 +1905,12 @@ gboolean mcap_create_mcl(struct mcap_instance *mi,
 		mcl->state = MCL_IDLE;
 		bacpy(&mcl->addr, addr);
 		set_default_cb(mcl);
-		mcl->next_mdl = (rand() % MCAP_MDLID_FINAL) + 1;
+		if (util_getrandom(&val, sizeof(val), 0) < 0) {
+			mcap_instance_unref(mcl->mi);
+			g_free(mcl);
+			return FALSE;
+		}
+		mcl->next_mdl = (val % MCAP_MDLID_FINAL) + 1;
 	}
 
 	mcl->ctrl |= MCAP_CTRL_CONN;
@@ -2025,6 +2020,7 @@ static void connect_mcl_event_cb(GIOChannel *chan, GError *gerr,
 	bdaddr_t dst;
 	char address[18], srcstr[18];
 	GError *err = NULL;
+	uint16_t val;
 
 	if (gerr)
 		return;
@@ -2053,7 +2049,12 @@ static void connect_mcl_event_cb(GIOChannel *chan, GError *gerr,
 		mcl->mi = mcap_instance_ref(mi);
 		bacpy(&mcl->addr, &dst);
 		set_default_cb(mcl);
-		mcl->next_mdl = (rand() % MCAP_MDLID_FINAL) + 1;
+		if (util_getrandom(&val, sizeof(val), 0) < 0) {
+			mcap_instance_unref(mcl->mi);
+			g_free(mcl);
+			goto drop;
+		}
+		mcl->next_mdl = (val % MCAP_MDLID_FINAL) + 1;
 	}
 
 	set_mcl_conf(chan, mcl);
@@ -3151,7 +3152,7 @@ void mcap_sync_set_req(struct mcap_mcl *mcl, uint8_t update, uint32_t btclock,
 		g_set_error(err,
 			MCAP_CSP_ERROR,
 			MCAP_ERROR_RESOURCE_UNAVAILABLE,
-			"Did not get CSP caps from slave yet");
+			"Did not get CSP caps from peripheral yet");
 		return;
 	}
 

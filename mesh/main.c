@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2017-2019  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
  *
  */
 
@@ -26,7 +17,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <signal.h>
 
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <ell/ell.h>
 
@@ -55,6 +48,12 @@ static const struct option main_options[] = {
 	{ }
 };
 
+static const char *io_usage =
+	       "\t(auto | generic:[hci]<index> | unit:<fd_path>)\n"
+	       "\t\tauto - Use first available controller (MGMT or raw HCI)\n"
+	       "\t\tgeneric - Use raw HCI io on interface hci<index>\n"
+	       "\t\tunit - Use test IO (for automatic testing only)\n";
+
 static void usage(void)
 {
 	fprintf(stderr,
@@ -62,17 +61,14 @@ static void usage(void)
 	       "\tbluetooth-meshd [options]\n");
 	fprintf(stderr,
 		"Options:\n"
-	       "\t--io <io>         Use specified io (default: generic)\n"
-	       "\t--config          Configuration directory\n"
+	       "\t--io <io>         Use specified io (default: auto)\n"
+	       "\t--config          Daemon configuration directory\n"
+	       "\t--storage         Mesh node(s) configuration directory\n"
 	       "\t--nodetach        Run in foreground\n"
 	       "\t--debug           Enable debug output\n"
 	       "\t--dbus-debug      Enable D-Bus debugging\n"
 	       "\t--help            Show %s information\n", __func__);
-	fprintf(stderr,
-	       "io:\n"
-	       "\t([hci]<index> | generic[:[hci]<index>])\n"
-	       "\t\tUse generic HCI io on interface hci<index>, or the first\n"
-	       "\t\tavailable one\n");
+	fprintf(stderr, "\n\t io: %s", io_usage);
 }
 
 static void do_debug(const char *str, void *user_data)
@@ -86,6 +82,7 @@ static void mesh_ready_callback(void *user_data, bool success)
 {
 	struct l_dbus *dbus = user_data;
 
+	l_info("mesh_ready_callback");
 	if (!success) {
 		l_error("Failed to start mesh");
 		l_main_quit();
@@ -101,10 +98,8 @@ static void mesh_ready_callback(void *user_data, bool success)
 static void request_name_callback(struct l_dbus *dbus, bool success,
 					bool queued, void *user_data)
 {
-	l_info("Request name %s",
-		success ? "success": "failed");
-
-	if (!success) {
+	if (!success && io_type != MESH_IO_TYPE_UNIT_TEST) {
+		l_info("Request name failed");
 		l_main_quit();
 		return;
 	}
@@ -130,6 +125,12 @@ static void disconnect_callback(void *user_data)
 	l_main_quit();
 }
 
+static void kill_to(struct l_timeout *timeout, void *user_data)
+{
+	l_timeout_remove(timeout);
+	l_main_quit();
+}
+
 static void signal_handler(uint32_t signo, void *user_data)
 {
 	static bool terminated;
@@ -138,25 +139,38 @@ static void signal_handler(uint32_t signo, void *user_data)
 		return;
 
 	l_info("Terminating");
-	l_main_quit();
+
+	mesh_cleanup(true);
+
+	if (io_type != MESH_IO_TYPE_UNIT_TEST)
+		l_timeout_create(1, kill_to, NULL, NULL);
+	else
+		l_main_quit();
+
 	terminated = true;
 }
 
 static bool parse_io(const char *optarg, enum mesh_io_type *type, void **opts)
 {
-	if (strstr(optarg, "generic") == optarg) {
+	if (strstr(optarg, "auto") == optarg) {
+		int *index = l_new(int, 1);
+
+		*type = MESH_IO_TYPE_AUTO;
+		*opts = index;
+
+		optarg += strlen("auto");
+		*index = MGMT_INDEX_NONE;
+		return true;
+
+		return false;
+	} else if (strstr(optarg, "generic") == optarg) {
 		int *index = l_new(int, 1);
 
 		*type = MESH_IO_TYPE_GENERIC;
 		*opts = index;
 
 		optarg += strlen("generic");
-		if (!*optarg) {
-			*index = MGMT_INDEX_NONE;
-			return true;
-		}
-
-		if (*optarg != ':')
+		if (!*optarg || *optarg != ':')
 			return false;
 
 		optarg++;
@@ -168,6 +182,21 @@ static bool parse_io(const char *optarg, enum mesh_io_type *type, void **opts)
 			return true;
 
 		return false;
+
+	} else if (strstr(optarg, "unit") == optarg) {
+		char *test_path;
+
+		*type = MESH_IO_TYPE_UNIT_TEST;
+
+		optarg += strlen("unit");
+		if (*optarg != ':')
+			return false;
+
+		optarg++;
+		test_path = strdup(optarg);
+
+		*opts = test_path;
+		return true;
 	}
 
 	return false;
@@ -196,11 +225,19 @@ int main(int argc, char *argv[])
 	for (;;) {
 		int opt;
 
-		opt = getopt_long(argc, argv, "i:s:c:ndbh", main_options, NULL);
+		opt = getopt_long(argc, argv, "u:i:s:c:ndbh", main_options,
+									NULL);
 		if (opt < 0)
 			break;
 
 		switch (opt) {
+		case 'u':
+			if (sscanf(optarg, "%d", &hci_index) == 1 ||
+					sscanf(optarg, "%d", &hci_index) == 1)
+				io = l_strdup_printf("unit:%d", hci_index);
+			else
+				io = l_strdup(optarg);
+			break;
 		case 'i':
 			if (sscanf(optarg, "hci%d", &hci_index) == 1 ||
 					sscanf(optarg, "%d", &hci_index) == 1)
@@ -235,10 +272,10 @@ int main(int argc, char *argv[])
 	}
 
 	if (!io)
-		io = l_strdup_printf("generic");
+		io = l_strdup_printf("auto");
 
 	if (!parse_io(io, &io_type, &io_opts)) {
-		l_error("Invalid io: %s", io);
+		l_error("Invalid io: %s\n%s", io, io_usage);
 		status = EXIT_FAILURE;
 		goto done;
 	}
@@ -249,7 +286,13 @@ int main(int argc, char *argv[])
 	if (!detached)
 		umask(0077);
 
-	dbus = l_dbus_new_default(L_DBUS_SYSTEM_BUS);
+	if (io_type != MESH_IO_TYPE_UNIT_TEST)
+		dbus = l_dbus_new_default(L_DBUS_SYSTEM_BUS);
+	else {
+		dbus = l_dbus_new_default(L_DBUS_SESSION_BUS);
+		prctl(PR_SET_PDEATHSIG, SIGSEGV);
+	}
+
 	if (!dbus) {
 		l_error("unable to connect to D-Bus");
 		status = EXIT_FAILURE;
@@ -270,13 +313,10 @@ int main(int argc, char *argv[])
 	status = l_main_run_with_signal(signal_handler, NULL);
 
 done:
-	if (io)
-		l_free(io);
+	l_free(io);
+	l_free(io_opts);
 
-	if (io_opts)
-		l_free(io_opts);
-
-	mesh_cleanup();
+	mesh_cleanup(false);
 	l_dbus_destroy(dbus);
 	l_main_exit();
 

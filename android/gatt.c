@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Intel Corporation. All rights reserved.
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -1351,7 +1338,8 @@ static void discover_primary_cb(uint8_t status, GSList *services,
 		}
 
 		bt_uuid_to_uuid128(&uuid, &u128);
-		new_uuid = g_memdup(&u128.value.u128, sizeof(u128.value.u128));
+		new_uuid = util_memdup(&u128.value.u128,
+					sizeof(u128.value.u128));
 
 		uuids = g_slist_prepend(uuids, new_uuid);
 	}
@@ -3742,7 +3730,11 @@ static void handle_client_register_for_notification(const void *buf,
 
 	notification = new0(struct notification_data, 1);
 
+_Pragma("GCC diagnostic push")
+_Pragma("GCC diagnostic ignored \"-Warray-bounds\"")
+_Pragma("GCC diagnostic ignored \"-Wstringop-overflow\"")
 	memcpy(&notification->ch, &cmd->char_id, sizeof(notification->ch));
+_Pragma("GCC diagnostic pop")
 	memcpy(&notification->service, &cmd->srvc_id,
 						sizeof(notification->service));
 	notification->conn = conn;
@@ -6646,7 +6638,7 @@ static uint8_t write_prep_request(const uint8_t *cmd, uint16_t cmd_len,
 
 	queue_push_tail(dev->pending_requests, data);
 
-	data->value = g_memdup(value, vlen);
+	data->value = util_memdup(value, vlen);
 	data->length = vlen;
 
 	if (!gatt_db_attribute_write(attrib, offset, value, vlen, cmd[0],

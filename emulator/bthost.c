@@ -1,24 +1,12 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2011-2012  Intel Corporation
  *  Copyright (C) 2004-2010  Marcel Holtmann <marcel@holtmann.org>
+ *  Copyright 2023 NXP
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -37,6 +25,8 @@
 #include "lib/bluetooth.h"
 
 #include "src/shared/util.h"
+#include "src/shared/tester.h"
+#include "src/shared/queue.h"
 #include "monitor/bt.h"
 #include "monitor/rfcomm.h"
 #include "bthost.h"
@@ -47,6 +37,11 @@
 #define acl_handle_pack(h, f)	(uint16_t)((h & 0x0fff)|(f << 12))
 #define acl_handle(h)		(h & 0x0fff)
 #define acl_flags(h)		(h >> 12)
+
+#define iso_flags_pb(f)		(f & 0x0003)
+#define iso_flags_ts(f)		((f >> 2) & 0x0001)
+#define iso_flags_pack(pb, ts)	(((pb) & 0x03) | (((ts) & 0x01) << 2))
+#define iso_data_len_pack(h, f)	((uint16_t) ((h) | ((f) << 14)))
 
 #define L2CAP_FEAT_FIXED_CHAN	0x00000080
 #define L2CAP_FC_SIG_BREDR	0x02
@@ -142,6 +137,12 @@ struct rfcomm_chan_hook {
 	struct rfcomm_chan_hook *next;
 };
 
+struct iso_hook {
+	bthost_cid_hook_func_t func;
+	void *user_data;
+	bthost_destroy_func_t destroy;
+};
+
 struct btconn {
 	uint16_t handle;
 	uint8_t bdaddr[6];
@@ -153,8 +154,12 @@ struct btconn {
 	struct rcconn *rcconns;
 	struct cid_hook *cid_hooks;
 	struct rfcomm_chan_hook *rfcomm_chan_hooks;
+	struct iso_hook *iso_hook;
 	struct btconn *next;
 	void *smp_data;
+	uint16_t recv_len;
+	uint16_t data_len;
+	void *recv_data;
 };
 
 struct l2conn {
@@ -199,6 +204,15 @@ struct rfcomm_connection_data {
 	void *user_data;
 };
 
+struct le_ext_adv {
+	struct bthost *bthost;
+	uint16_t event_type;
+	uint8_t  addr_type;
+	uint8_t  addr[6];
+	uint8_t  direct_addr_type;
+	uint8_t  direct_addr[6];
+};
+
 struct bthost {
 	bool ready;
 	bthost_ready_cb ready_cb;
@@ -213,6 +227,9 @@ struct bthost {
 	void *cmd_complete_data;
 	bthost_new_conn_cb new_conn_cb;
 	void *new_conn_data;
+	bthost_accept_conn_cb accept_iso_cb;
+	bthost_new_conn_cb new_iso_cb;
+	void *new_iso_data;
 	struct rfcomm_connection_data *rfcomm_conn_data;
 	struct l2cap_conn_cb_data *new_l2cap_conn_data;
 	struct rfcomm_conn_cb_data *new_rfcomm_conn_data;
@@ -226,6 +243,12 @@ struct bthost {
 	bool conn_init;
 	bool le;
 	bool sc;
+
+	struct queue *le_ext_adv;
+
+	bthost_debug_func_t debug_callback;
+	bthost_destroy_func_t debug_destroy;
+	void *debug_data;
 };
 
 struct bthost *bthost_create(void)
@@ -241,6 +264,8 @@ struct bthost *bthost_create(void)
 		free(bthost);
 		return NULL;
 	}
+
+	bthost->le_ext_adv = queue_new();
 
 	/* Set defaults */
 	bthost->io_capability = 0x03;
@@ -286,6 +311,11 @@ static void btconn_free(struct btconn *conn)
 		free(hook);
 	}
 
+	if (conn->iso_hook && conn->iso_hook->destroy)
+		conn->iso_hook->destroy(conn->iso_hook->user_data);
+
+	free(conn->iso_hook);
+	free(conn->recv_data);
 	free(conn);
 }
 
@@ -411,6 +441,32 @@ static struct rfcomm_conn_cb_data *bthost_find_rfcomm_cb_by_channel(
 	return NULL;
 }
 
+static struct le_ext_adv *le_ext_adv_new(struct bthost *bthost)
+{
+	struct le_ext_adv *ext_adv;
+
+	ext_adv = new0(struct le_ext_adv, 1);
+	ext_adv->bthost = bthost;
+
+	/* Add to queue */
+	if (!queue_push_tail(bthost->le_ext_adv, ext_adv)) {
+		free(ext_adv);
+		return NULL;
+	}
+
+	return ext_adv;
+}
+
+static void le_ext_adv_free(void *data)
+{
+	struct le_ext_adv *ext_adv = data;
+
+	/* Remove from queue */
+	queue_remove(ext_adv->bthost->le_ext_adv, ext_adv);
+
+	free(ext_adv);
+}
+
 void bthost_destroy(struct bthost *bthost)
 {
 	if (!bthost)
@@ -457,6 +513,8 @@ void bthost_destroy(struct bthost *bthost)
 
 	smp_stop(bthost->smp_data);
 
+	queue_destroy(bthost->le_ext_adv, le_ext_adv_free);
+
 	free(bthost);
 }
 
@@ -500,8 +558,19 @@ static void queue_command(struct bthost *bthost, const struct iovec *iov,
 static void send_packet(struct bthost *bthost, const struct iovec *iov,
 								int iovlen)
 {
+	int i;
+
 	if (!bthost->send_handler)
 		return;
+
+	for (i = 0; i < iovlen; i++) {
+		if (!i)
+			util_hexdump('<', iov[i].iov_base, iov[i].iov_len,
+				bthost->debug_callback, bthost->debug_data);
+		else
+			util_hexdump(' ', iov[i].iov_base, iov[i].iov_len,
+				bthost->debug_callback, bthost->debug_data);
+	}
 
 	bthost->send_handler(iov, iovlen, bthost->send_data);
 }
@@ -614,6 +683,30 @@ void bthost_add_cid_hook(struct bthost *bthost, uint16_t handle, uint16_t cid,
 	conn->cid_hooks = hook;
 }
 
+void bthost_add_iso_hook(struct bthost *bthost, uint16_t handle,
+				bthost_iso_hook_func_t func, void *user_data,
+				bthost_destroy_func_t destroy)
+{
+	struct iso_hook *hook;
+	struct btconn *conn;
+
+	conn = bthost_find_conn(bthost, handle);
+	if (!conn || conn->iso_hook)
+		return;
+
+	hook = malloc(sizeof(*hook));
+	if (!hook)
+		return;
+
+	memset(hook, 0, sizeof(*hook));
+
+	hook->func = func;
+	hook->user_data = user_data;
+	hook->destroy = destroy;
+
+	conn->iso_hook = hook;
+}
+
 void bthost_send_cid(struct bthost *bthost, uint16_t handle, uint16_t cid,
 					const void *data, uint16_t len)
 {
@@ -636,6 +729,69 @@ void bthost_send_cid_v(struct bthost *bthost, uint16_t handle, uint16_t cid,
 		return;
 
 	send_iov(bthost, handle, cid, iov, iovcnt);
+}
+
+static void send_iso(struct bthost *bthost, uint16_t handle, bool ts,
+			uint16_t sn, uint32_t timestamp, uint8_t pkt_status,
+			const struct iovec *iov, int iovcnt)
+{
+	struct bt_hci_iso_hdr iso_hdr;
+	struct bt_hci_iso_data_start data_hdr;
+	uint8_t pkt = BT_H4_ISO_PKT;
+	struct iovec pdu[4 + iovcnt];
+	uint16_t flags, dlen;
+	int i, len = 0;
+
+	for (i = 0; i < iovcnt; i++) {
+		pdu[4 + i].iov_base = iov[i].iov_base;
+		pdu[4 + i].iov_len = iov[i].iov_len;
+		len += iov[i].iov_len;
+	}
+
+	pdu[0].iov_base = &pkt;
+	pdu[0].iov_len = sizeof(pkt);
+
+	flags = iso_flags_pack(0x02, ts);
+	dlen = len + sizeof(data_hdr);
+	if (ts)
+		dlen += sizeof(timestamp);
+
+	iso_hdr.handle = acl_handle_pack(handle, flags);
+	iso_hdr.dlen = cpu_to_le16(dlen);
+
+	pdu[1].iov_base = &iso_hdr;
+	pdu[1].iov_len = sizeof(iso_hdr);
+
+	if (ts) {
+		timestamp = cpu_to_le32(timestamp);
+
+		pdu[2].iov_base = &timestamp;
+		pdu[2].iov_len = sizeof(timestamp);
+	} else {
+		pdu[2].iov_base = NULL;
+		pdu[2].iov_len = 0;
+	}
+
+	data_hdr.sn = cpu_to_le16(sn);
+	data_hdr.slen = cpu_to_le16(iso_data_len_pack(len, pkt_status));
+
+	pdu[3].iov_base = &data_hdr;
+	pdu[3].iov_len = sizeof(data_hdr);
+
+	send_packet(bthost, pdu, 4 + iovcnt);
+}
+
+void bthost_send_iso(struct bthost *bthost, uint16_t handle, bool ts,
+			uint16_t sn, uint32_t timestamp, uint8_t pkt_status,
+			const struct iovec *iov, int iovcnt)
+{
+	struct btconn *conn;
+
+	conn = bthost_find_conn(bthost, handle);
+	if (!conn)
+		return;
+
+	send_iso(bthost, handle, ts, sn, timestamp, pkt_status, iov, iovcnt);
 }
 
 bool bthost_l2cap_req(struct bthost *bthost, uint16_t handle, uint8_t code,
@@ -687,6 +843,8 @@ static void send_command(struct bthost *bthost, uint16_t opcode,
 	struct bt_hci_cmd_hdr hdr;
 	uint8_t pkt = BT_H4_CMD_PKT;
 	struct iovec iov[3];
+
+	bthost_debug(bthost, "command 0x%02x", opcode);
 
 	iov[0].iov_base = &pkt;
 	iov[0].iov_len = sizeof(pkt);
@@ -772,6 +930,34 @@ void bthost_notify_ready(struct bthost *bthost, bthost_ready_cb cb)
 	bthost->ready_cb = cb;
 }
 
+bool bthost_set_debug(struct bthost *bthost, bthost_debug_func_t callback,
+			void *user_data, bthost_destroy_func_t destroy)
+{
+	if (!bthost)
+		return false;
+
+	if (bthost->debug_destroy)
+		bthost->debug_destroy(bthost->debug_data);
+
+	bthost->debug_callback = callback;
+	bthost->debug_destroy = destroy;
+	bthost->debug_data = user_data;
+
+	return true;
+}
+
+void bthost_debug(struct bthost *host, const char *format, ...)
+{
+	va_list ap;
+
+	if (!host || !format || !host->debug_callback)
+		return;
+
+	va_start(ap, format);
+	util_debug_va(host->debug_callback, host->debug_data, format, ap);
+	va_end(ap);
+}
+
 static void read_local_features_complete(struct bthost *bthost,
 						const void *data, uint8_t len)
 {
@@ -847,8 +1033,13 @@ static void evt_cmd_complete(struct bthost *bthost, const void *data,
 		break;
 	case BT_HCI_CMD_LE_SET_EXT_ADV_ENABLE:
 		break;
+	case BT_HCI_CMD_LE_SET_PA_PARAMS:
+		break;
+	case BT_HCI_CMD_LE_SET_PA_ENABLE:
+		break;
 	default:
-		printf("Unhandled cmd_complete opcode 0x%04x\n", opcode);
+		bthost_debug(bthost, "Unhandled cmd_complete opcode 0x%04x",
+								opcode);
 		break;
 	}
 
@@ -900,6 +1091,7 @@ static void init_conn(struct bthost *bthost, uint16_t handle,
 {
 	struct btconn *conn;
 	const uint8_t *ia, *ra;
+	uint8_t ia_type, ra_type;
 
 	conn = malloc(sizeof(*conn));
 	if (!conn)
@@ -916,14 +1108,24 @@ static void init_conn(struct bthost *bthost, uint16_t handle,
 
 	if (bthost->conn_init) {
 		ia = bthost->bdaddr;
-		ra = conn->bdaddr;
+		if (addr_type == BDADDR_BREDR)
+			ia_type = addr_type;
+		else
+			ia_type = BDADDR_LE_PUBLIC;
+		ra = bdaddr;
+		ra_type = addr_type;
 	} else {
-		ia = conn->bdaddr;
+		ia = bdaddr;
+		ia_type = addr_type;
 		ra = bthost->bdaddr;
+		if (addr_type == BDADDR_BREDR)
+			ra_type = addr_type;
+		else
+			ra_type = BDADDR_LE_PUBLIC;
 	}
 
-	conn->smp_data = smp_conn_add(bthost->smp_data, handle, ia, ra,
-						addr_type, bthost->conn_init);
+	conn->smp_data = smp_conn_add(bthost->smp_data, handle, ia, ia_type,
+					ra, ra_type, bthost->conn_init);
 
 	if (bthost->new_conn_cb)
 		bthost->new_conn_cb(conn->handle, bthost->new_conn_data);
@@ -1246,6 +1448,132 @@ static void evt_le_ltk_request(struct bthost *bthost, const void *data,
 								sizeof(cp));
 }
 
+static void init_iso(struct bthost *bthost, uint16_t handle,
+				const uint8_t *bdaddr, uint8_t addr_type)
+{
+	struct btconn *conn;
+
+	bthost_debug(bthost, "ISO handle 0x%4.4x", handle);
+
+	conn = malloc(sizeof(*conn));
+	if (!conn)
+		return;
+
+	memset(conn, 0, sizeof(*conn));
+	conn->handle = handle;
+	memcpy(conn->bdaddr, bdaddr, 6);
+	conn->addr_type = addr_type;
+
+	conn->next = bthost->conns;
+	bthost->conns = conn;
+
+	if (bthost->new_iso_cb)
+		bthost->new_iso_cb(handle, bthost->new_iso_data);
+}
+
+static void evt_le_cis_established(struct bthost *bthost, const void *data,
+							uint8_t size)
+{
+	const struct bt_hci_evt_le_cis_established *ev = data;
+
+	if (ev->status)
+		return;
+
+	init_iso(bthost, ev->conn_handle, BDADDR_ANY->b, BDADDR_LE_PUBLIC);
+}
+
+static void evt_le_cis_req(struct bthost *bthost, const void *data, uint8_t len)
+{
+	const struct bt_hci_evt_le_cis_req *ev = data;
+	struct bt_hci_cmd_le_accept_cis cmd;
+	struct bt_hci_cmd_le_reject_cis rej;
+
+	if (len < sizeof(*ev))
+		return;
+
+	if (bthost->accept_iso_cb) {
+		memset(&rej, 0, sizeof(rej));
+
+		rej.reason = bthost->accept_iso_cb(le16_to_cpu(ev->cis_handle),
+							bthost->new_iso_data);
+		if (rej.reason) {
+			rej.handle = ev->cis_handle;
+			send_command(bthost, BT_HCI_CMD_LE_REJECT_CIS,
+						     &rej, sizeof(rej));
+			return;
+		}
+	}
+
+	memset(&cmd, 0, sizeof(cmd));
+	cmd.handle = ev->cis_handle;
+
+	send_command(bthost, BT_HCI_CMD_LE_ACCEPT_CIS, &cmd, sizeof(cmd));
+}
+
+static void evt_le_ext_adv_report(struct bthost *bthost, const void *data,
+								uint8_t len)
+{
+	const struct bt_hci_evt_le_ext_adv_report *ev = data;
+	const struct bt_hci_le_ext_adv_report *report;
+	struct le_ext_adv *le_ext_adv;
+	int i;
+
+	data += sizeof(ev->num_reports);
+
+	for (i = 0; i < ev->num_reports; i++) {
+		char addr_str[18];
+
+		report = data;
+		ba2str((bdaddr_t *) report->addr, addr_str);
+
+		bthost_debug(bthost, "le ext adv report: %s (0x%02x)",
+						addr_str, report->addr_type);
+
+		/* Add ext event to the queue */
+		le_ext_adv = le_ext_adv_new(bthost);
+		if (le_ext_adv) {
+			le_ext_adv->addr_type = report->addr_type;
+			memcpy(le_ext_adv->addr, report->addr, 6);
+			le_ext_adv->direct_addr_type = report->direct_addr_type;
+			memcpy(le_ext_adv->direct_addr, report->direct_addr, 6);
+		}
+
+		data += (sizeof(*report) + report->data_len);
+	}
+}
+
+static void evt_le_big_complete(struct bthost *bthost, const void *data,
+							uint8_t size)
+{
+	const struct bt_hci_evt_le_big_complete *ev = data;
+	int i;
+
+	if (ev->status)
+		return;
+
+	for (i = 0; i < ev->num_bis; i++) {
+		uint16_t handle = le16_to_cpu(ev->bis_handle[i]);
+
+		init_iso(bthost, handle, BDADDR_ANY->b, BDADDR_LE_PUBLIC);
+	}
+}
+
+static void evt_le_big_sync_established(struct bthost *bthost,
+						const void *data, uint8_t size)
+{
+	const struct bt_hci_evt_le_big_sync_estabilished *ev = data;
+	int i;
+
+	if (ev->status)
+		return;
+
+	for (i = 0; i < ev->num_bis; i++) {
+		uint16_t handle = le16_to_cpu(ev->bis[i]);
+
+		init_iso(bthost, handle, BDADDR_ANY->b, BDADDR_LE_PUBLIC);
+	}
+}
+
 static void evt_le_meta_event(struct bthost *bthost, const void *data,
 								uint8_t len)
 {
@@ -1254,6 +1582,8 @@ static void evt_le_meta_event(struct bthost *bthost, const void *data,
 
 	if (len < 1)
 		return;
+
+	bthost_debug(bthost, "meta event 0x%02x", *event);
 
 	switch (*event) {
 	case BT_HCI_EVT_LE_CONN_COMPLETE:
@@ -1271,8 +1601,24 @@ static void evt_le_meta_event(struct bthost *bthost, const void *data,
 	case BT_HCI_EVT_LE_ENHANCED_CONN_COMPLETE:
 		evt_le_ext_conn_complete(bthost, evt_data, len - 1);
 		break;
+	case BT_HCI_EVT_LE_EXT_ADV_REPORT:
+		evt_le_ext_adv_report(bthost, evt_data, len - 1);
+		break;
+	case BT_HCI_EVT_LE_CIS_ESTABLISHED:
+		evt_le_cis_established(bthost, evt_data, len - 1);
+		break;
+	case BT_HCI_EVT_LE_CIS_REQ:
+		evt_le_cis_req(bthost, evt_data, len - 1);
+		break;
+	case BT_HCI_EVT_LE_BIG_COMPLETE:
+		evt_le_big_complete(bthost, evt_data, len - 1);
+		break;
+	case BT_HCI_EVT_LE_BIG_SYNC_ESTABILISHED:
+		evt_le_big_sync_established(bthost, evt_data, len - 1);
+		break;
 	default:
-		printf("Unsupported LE Meta event 0x%2.2x\n", *event);
+		bthost_debug(bthost, "Unsupported LE Meta event 0x%2.2x",
+								*event);
 		break;
 	}
 }
@@ -1289,6 +1635,8 @@ static void process_evt(struct bthost *bthost, const void *data, uint16_t len)
 		return;
 
 	param = data + sizeof(*hdr);
+
+	bthost_debug(bthost, "event 0x%02x", hdr->evt);
 
 	switch (hdr->evt) {
 	case BT_HCI_EVT_CMD_COMPLETE:
@@ -1356,7 +1704,7 @@ static void process_evt(struct bthost *bthost, const void *data, uint16_t len)
 		break;
 
 	default:
-		printf("Unsupported event 0x%2.2x\n", hdr->evt);
+		bthost_debug(bthost, "Unsupported event 0x%2.2x", hdr->evt);
 		break;
 	}
 }
@@ -1425,6 +1773,7 @@ static void rfcomm_sabm_send(struct bthost *bthost, struct btconn *conn,
 {
 	struct rfcomm_cmd cmd;
 
+	memset(&cmd, 0, sizeof(cmd));
 	cmd.address = RFCOMM_ADDR(cr, dlci);
 	cmd.control = RFCOMM_CTRL(RFCOMM_SABM, 1);
 	cmd.length = RFCOMM_LEN8(0);
@@ -1629,6 +1978,19 @@ static void handle_pending_l2reqs(struct bthost *bthost, struct btconn *conn,
 	}
 }
 
+static bool l2cap_rsp(uint8_t code)
+{
+	switch (code) {
+	case BT_L2CAP_PDU_CMD_REJECT:
+	case BT_L2CAP_PDU_CONN_RSP:
+	case BT_L2CAP_PDU_CONFIG_RSP:
+	case BT_L2CAP_PDU_INFO_RSP:
+		return true;
+	}
+
+	return false;
+}
+
 static void l2cap_sig(struct bthost *bthost, struct btconn *conn,
 						const void *data, uint16_t len)
 {
@@ -1687,11 +2049,12 @@ static void l2cap_sig(struct bthost *bthost, struct btconn *conn,
 		break;
 
 	default:
-		printf("Unknown L2CAP code 0x%02x\n", hdr->code);
+		bthost_debug(bthost, "Unknown L2CAP code 0x%02x", hdr->code);
 		ret = false;
 	}
 
-	handle_pending_l2reqs(bthost, conn, hdr->ident, hdr->code,
+	if (l2cap_rsp(hdr->code))
+		handle_pending_l2reqs(bthost, conn, hdr->ident, hdr->code,
 						data + sizeof(*hdr), hdr_len);
 
 	if (ret)
@@ -1848,6 +2211,19 @@ static bool l2cap_ecred_conn_rsp(struct bthost *bthost, struct btconn *conn,
 	return true;
 }
 
+static bool l2cap_le_rsp(uint8_t code)
+{
+	switch (code) {
+	case BT_L2CAP_PDU_CMD_REJECT:
+	case BT_L2CAP_PDU_CONN_PARAM_RSP:
+	case BT_L2CAP_PDU_LE_CONN_RSP:
+	case BT_L2CAP_PDU_ECRED_CONN_RSP:
+		return true;
+	}
+
+	return false;
+}
+
 static void l2cap_le_sig(struct bthost *bthost, struct btconn *conn,
 						const void *data, uint16_t len)
 {
@@ -1905,11 +2281,12 @@ static void l2cap_le_sig(struct bthost *bthost, struct btconn *conn,
 		break;
 
 	default:
-		printf("Unknown L2CAP code 0x%02x\n", hdr->code);
+		bthost_debug(bthost, "Unknown L2CAP code 0x%02x", hdr->code);
 		ret = false;
 	}
 
-	handle_pending_l2reqs(bthost, conn, hdr->ident, hdr->code,
+	if (l2cap_le_rsp(hdr->code))
+		handle_pending_l2reqs(bthost, conn, hdr->ident, hdr->code,
 						data + sizeof(*hdr), hdr_len);
 
 	if (ret)
@@ -1950,6 +2327,7 @@ static void rfcomm_ua_send(struct bthost *bthost, struct btconn *conn,
 {
 	struct rfcomm_cmd cmd;
 
+	memset(&cmd, 0, sizeof(cmd));
 	cmd.address = RFCOMM_ADDR(cr, dlci);
 	cmd.control = RFCOMM_CTRL(RFCOMM_UA, 1);
 	cmd.length = RFCOMM_LEN8(0);
@@ -1963,6 +2341,7 @@ static void rfcomm_dm_send(struct bthost *bthost, struct btconn *conn,
 {
 	struct rfcomm_cmd cmd;
 
+	memset(&cmd, 0, sizeof(cmd));
 	cmd.address = RFCOMM_ADDR(cr, dlci);
 	cmd.control = RFCOMM_CTRL(RFCOMM_DM, 1);
 	cmd.length = RFCOMM_LEN8(0);
@@ -2142,7 +2521,7 @@ static void rfcomm_pn_recv(struct bthost *bthost, struct btconn *conn,
 	pn_cmd.ack_timer = pn->ack_timer;
 	pn_cmd.max_retrans = pn->max_retrans;
 	pn_cmd.mtu = pn->mtu;
-	pn_cmd.credits = pn->credits;
+	pn_cmd.credits = 255;
 
 	rfcomm_uih_send(bthost, conn, l2conn, RFCOMM_ADDR(1, 0),
 			RFCOMM_MCC_TYPE(0, RFCOMM_PN), &pn_cmd, sizeof(pn_cmd));
@@ -2193,20 +2572,25 @@ static void rfcomm_uih_recv(struct bthost *bthost, struct btconn *conn,
 	uint16_t hdr_len, data_len;
 	const void *p;
 
-	if (len < sizeof(*hdr))
+	if (len < sizeof(*hdr)) {
+		bthost_debug(bthost, "RFCOMM UIH: too short");
 		return;
+	}
 
 	if (RFCOMM_TEST_EA(hdr->length)) {
 		data_len = (uint16_t) GET_LEN8(hdr->length);
 		hdr_len = sizeof(*hdr);
 	} else {
 		uint8_t ex_len = *((uint8_t *)(data + sizeof(*hdr)));
-		data_len = ((uint16_t) hdr->length << 8) | ex_len;
+		data_len = GET_LEN16((((uint16_t) ex_len << 8) | hdr->length));
 		hdr_len = sizeof(*hdr) + sizeof(uint8_t);
 	}
 
-	if (len < hdr_len + data_len)
+	if (len < hdr_len + data_len) {
+		bthost_debug(bthost, "RFCOMM UIH: %u != %u", len,
+						hdr_len + data_len);
 		return;
+	}
 
 	p = data + hdr_len;
 
@@ -2228,6 +2612,8 @@ static void process_rfcomm(struct bthost *bthost, struct btconn *conn,
 {
 	const struct rfcomm_hdr *hdr = data;
 
+	bthost_debug(bthost, "RFCOMM data: %u bytes", len);
+
 	switch (RFCOMM_GET_TYPE(hdr->control)) {
 	case RFCOMM_SABM:
 		rfcomm_sabm_recv(bthost, conn, l2conn, data, len);
@@ -2245,70 +2631,254 @@ static void process_rfcomm(struct bthost *bthost, struct btconn *conn,
 		rfcomm_uih_recv(bthost, conn, l2conn, data, len);
 		break;
 	default:
-		printf("Unknown frame type\n");
+		bthost_debug(bthost, "Unknown frame type");
 		break;
 	}
+}
+
+static void process_l2cap(struct bthost *bthost, struct btconn *conn,
+					const void *data, uint16_t len)
+{
+	const struct bt_l2cap_hdr *l2_hdr = data;
+	struct cid_hook *hook;
+	struct l2conn *l2conn;
+	uint16_t cid, l2_len;
+
+	l2_len = le16_to_cpu(l2_hdr->len);
+	if (len != sizeof(*l2_hdr) + l2_len) {
+		bthost_debug(bthost, "L2CAP invalid length: %u != %zu",
+					len, sizeof(*l2_hdr) + l2_len);
+		return;
+	}
+
+	bthost_debug(bthost, "L2CAP data: %u bytes", l2_len);
+
+	cid = le16_to_cpu(l2_hdr->cid);
+
+	hook = find_cid_hook(conn, cid);
+	if (hook) {
+		hook->func(l2_hdr->data, l2_len, hook->user_data);
+		return;
+	}
+
+	switch (cid) {
+	case 0x0001:
+		l2cap_sig(bthost, conn, l2_hdr->data, l2_len);
+		break;
+	case 0x0005:
+		l2cap_le_sig(bthost, conn, l2_hdr->data, l2_len);
+		break;
+	case 0x0006:
+		smp_data(conn->smp_data, l2_hdr->data, l2_len);
+		break;
+	case 0x0007:
+		smp_bredr_data(conn->smp_data, l2_hdr->data, l2_len);
+		break;
+	default:
+		l2conn = btconn_find_l2cap_conn_by_scid(conn, cid);
+		if (l2conn && l2conn->psm == 0x0003)
+			process_rfcomm(bthost, conn, l2conn, l2_hdr->data,
+								l2_len);
+		else
+			bthost_debug(bthost,
+					"Packet for unknown CID 0x%04x (%u)",
+					cid, cid);
+		break;
+	}
+}
+
+static void append_recv_data(struct bthost *bthost, struct btconn *conn,
+				const char *type, uint8_t flags,
+				const void *data, uint16_t len)
+{
+	if (!conn->recv_data) {
+		bthost_debug(bthost, "Unexpected %s frame: handle 0x%4.4x "
+				"flags 0x%2.2x", type, conn->handle, flags);
+		return;
+	}
+
+	if (conn->recv_len + len > conn->data_len) {
+		bthost_debug(bthost, "Unexpected %s frame: handle 0x%4.4x "
+				"flags 0x%2.2x", type, conn->handle, flags);
+		return;
+	}
+
+	memcpy(conn->recv_data + conn->recv_len, data, len);
+	conn->recv_len += len;
+
+	bthost_debug(bthost, "%s data: %u/%u bytes", type, conn->recv_len,
+							conn->data_len);
+}
+
+static void free_recv_data(struct btconn *conn)
+{
+	free(conn->recv_data);
+	conn->recv_data = NULL;
+	conn->recv_len = 0;
+	conn->data_len = 0;
+}
+
+static void append_acl_data(struct bthost *bthost, struct btconn *conn,
+				uint8_t flags, const void *data, uint16_t len)
+{
+	append_recv_data(bthost, conn, "ACL", flags, data, len);
+
+	if (conn->recv_len < conn->data_len)
+		return;
+
+	process_l2cap(bthost, conn, conn->recv_data, conn->recv_len);
+
+	free_recv_data(conn);
+}
+
+static void new_recv_data(struct btconn *conn, uint16_t len)
+{
+	conn->recv_data = malloc(len);
+	conn->recv_len = 0;
+	conn->data_len = len;
 }
 
 static void process_acl(struct bthost *bthost, const void *data, uint16_t len)
 {
 	const struct bt_hci_acl_hdr *acl_hdr = data;
-	const struct bt_l2cap_hdr *l2_hdr = data + sizeof(*acl_hdr);
-	uint16_t handle, cid, acl_len, l2_len;
-	struct cid_hook *hook;
+	const struct bt_l2cap_hdr *l2_hdr = (void *) acl_hdr->data;
+	uint16_t handle, acl_len, l2_len;
+	uint8_t flags;
 	struct btconn *conn;
-	struct l2conn *l2conn;
-	const void *l2_data;
-
-	if (len < sizeof(*acl_hdr) + sizeof(*l2_hdr))
-		return;
 
 	acl_len = le16_to_cpu(acl_hdr->dlen);
 	if (len != sizeof(*acl_hdr) + acl_len)
 		return;
 
 	handle = acl_handle(acl_hdr->handle);
+	flags = acl_flags(acl_hdr->handle);
+
 	conn = bthost_find_conn(bthost, handle);
 	if (!conn) {
-		printf("ACL data for unknown handle 0x%04x\n", handle);
+		bthost_debug(bthost, "Unknown handle: 0x%4.4x", handle);
 		return;
 	}
 
-	l2_len = le16_to_cpu(l2_hdr->len);
-	if (len - sizeof(*acl_hdr) != sizeof(*l2_hdr) + l2_len)
-		return;
+	switch (flags) {
+	case 0x00:	/* start of a non-automatically-flushable PDU */
+	case 0x02:	/* start of an automatically-flushable PDU */
+		if (conn->recv_data) {
+			bthost_debug(bthost, "Unexpected ACL start frame");
+			free_recv_data(conn);
+		}
 
-	l2_data = data + sizeof(*acl_hdr) + sizeof(*l2_hdr);
+		l2_len = le16_to_cpu(l2_hdr->len) + sizeof(*l2_hdr);
 
-	cid = le16_to_cpu(l2_hdr->cid);
+		bthost_debug(bthost, "acl_len %u l2_len %u", acl_len, l2_len);
 
-	hook = find_cid_hook(conn, cid);
-	if (hook) {
-		hook->func(l2_data, l2_len, hook->user_data);
-		return;
-	}
+		if (acl_len == l2_len) {
+			process_l2cap(bthost, conn, acl_hdr->data, acl_len);
+			break;
+		}
 
-	switch (cid) {
-	case 0x0001:
-		l2cap_sig(bthost, conn, l2_data, l2_len);
+		new_recv_data(conn, l2_len);
+		/* fall through */
+	case 0x01:	/* continuing fragment */
+		append_acl_data(bthost, conn, flags, acl_hdr->data, acl_len);
 		break;
-	case 0x0005:
-		l2cap_le_sig(bthost, conn, l2_data, l2_len);
-		break;
-	case 0x0006:
-		smp_data(conn->smp_data, l2_data, l2_len);
-		break;
-	case 0x0007:
-		smp_bredr_data(conn->smp_data, l2_data, l2_len);
+	case 0x03:	/* complete automatically-flushable PDU */
+		process_l2cap(bthost, conn, acl_hdr->data, acl_len);
 		break;
 	default:
-		l2conn = btconn_find_l2cap_conn_by_scid(conn, cid);
-		if (l2conn && l2conn->psm == 0x0003)
-			process_rfcomm(bthost, conn, l2conn, l2_data, l2_len);
-		else
-			printf("Packet for unknown CID 0x%04x (%u)\n", cid,
-									cid);
+		bthost_debug(bthost, "Invalid ACL frame flags 0x%2.2x", flags);
+	}
+}
+
+static void process_iso_data(struct bthost *bthost, struct btconn *conn,
+					const void *data, uint16_t len)
+{
+	const struct bt_hci_iso_data_start *data_hdr = data;
+	uint16_t data_len;
+	struct iso_hook *hook;
+
+	data_len = le16_to_cpu(data_hdr->slen);
+	if (len != sizeof(*data_hdr) + data_len) {
+		bthost_debug(bthost, "ISO invalid length: %u != %zu",
+					len, sizeof(*data_hdr) + data_len);
+		return;
+	}
+
+	bthost_debug(bthost, "ISO data: %u bytes (%u)", data_len, data_hdr->sn);
+
+	hook = conn->iso_hook;
+	if (!hook)
+		return;
+
+	hook->func(data_hdr->data, data_len, hook->user_data);
+}
+
+static void append_iso_data(struct bthost *bthost, struct btconn *conn,
+				uint8_t flags, const void *data, uint16_t len)
+{
+	append_recv_data(bthost, conn, "ISO", flags, data, len);
+
+	if (conn->recv_len < conn->data_len) {
+		if (flags == 0x03) {
+			bthost_debug(bthost, "Unexpected ISO end frame");
+			free_recv_data(conn);
+		}
+		return;
+	}
+
+	process_iso_data(bthost, conn, conn->recv_data, conn->recv_len);
+
+	free_recv_data(conn);
+}
+
+static void process_iso(struct bthost *bthost, const void *data, uint16_t len)
+{
+	const struct bt_hci_iso_hdr *iso_hdr = data;
+	const struct bt_hci_iso_data_start *data_hdr;
+	uint16_t handle, iso_len, data_len;
+	uint8_t flags;
+	struct btconn *conn;
+
+	iso_len = le16_to_cpu(iso_hdr->dlen);
+	if (len != sizeof(*iso_hdr) + iso_len)
+		return;
+
+	handle = acl_handle(iso_hdr->handle);
+	flags = iso_flags_pb(acl_flags(iso_hdr->handle));
+
+	conn = bthost_find_conn(bthost, handle);
+	if (!conn) {
+		bthost_debug(bthost, "Unknown handle: 0x%4.4x", handle);
+		return;
+	}
+
+	data_hdr = (void *) data + sizeof(*iso_hdr);
+
+	switch (flags) {
+	case 0x00:
+	case 0x02:
+		if (conn->recv_data) {
+			bthost_debug(bthost, "Unexpected ISO start frame");
+			free_recv_data(conn);
+		}
+
+		data_len = le16_to_cpu(data_hdr->slen) + sizeof(*data_hdr);
+
+		bthost_debug(bthost, "iso_len %u data_len %u", iso_len,
+								data_len);
+
+		if (iso_len == data_len) {
+			process_iso_data(bthost, conn, iso_hdr->data, iso_len);
+			break;
+		}
+
+		new_recv_data(conn, data_len);
+		/* fall through */
+	case 0x01:
+	case 0x03:
+		append_iso_data(bthost, conn, flags, iso_hdr->data, iso_len);
 		break;
+	default:
+		bthost_debug(bthost, "Invalid ISO frame flags 0x%2.2x", flags);
 	}
 }
 
@@ -2322,6 +2892,9 @@ void bthost_receive_h4(struct bthost *bthost, const void *data, uint16_t len)
 	if (len < 1)
 		return;
 
+	util_hexdump('>', data, len, bthost->debug_callback,
+					bthost->debug_data);
+
 	pkt_type = ((const uint8_t *) data)[0];
 
 	switch (pkt_type) {
@@ -2331,8 +2904,11 @@ void bthost_receive_h4(struct bthost *bthost, const void *data, uint16_t len)
 	case BT_H4_ACL_PKT:
 		process_acl(bthost, data + 1, len - 1);
 		break;
+	case BT_H4_ISO_PKT:
+		process_iso(bthost, data + 1, len - 1);
+		break;
 	default:
-		printf("Unsupported packet 0x%2.2x\n", pkt_type);
+		bthost_debug(bthost, "Unsupported packet 0x%2.2x", pkt_type);
 		break;
 	}
 }
@@ -2349,6 +2925,14 @@ void bthost_set_connect_cb(struct bthost *bthost, bthost_new_conn_cb cb,
 {
 	bthost->new_conn_cb = cb;
 	bthost->new_conn_data = user_data;
+}
+
+void bthost_set_iso_cb(struct bthost *bthost, bthost_accept_conn_cb accept,
+				bthost_new_conn_cb cb, void *user_data)
+{
+	bthost->accept_iso_cb = accept;
+	bthost->new_iso_cb = cb;
+	bthost->new_iso_data = user_data;
 }
 
 void bthost_hci_connect(struct bthost *bthost, const uint8_t *bdaddr,
@@ -2458,6 +3042,7 @@ void bthost_set_ext_adv_data(struct bthost *bthost, const uint8_t *data,
 	memset(adv_cp, 0, sizeof(*adv_cp));
 	memset(adv_cp->data, 0, 31);
 
+	adv_cp->handle = 1;
 	adv_cp->operation = 0x03;
 	adv_cp->fragment_preference = 0x01;
 
@@ -2481,19 +3066,160 @@ void bthost_set_adv_enable(struct bthost *bthost, uint8_t enable)
 	send_command(bthost, BT_HCI_CMD_LE_SET_ADV_ENABLE, &enable, 1);
 }
 
-void bthost_set_ext_adv_enable(struct bthost *bthost, uint8_t enable)
+void bthost_set_scan_params(struct bthost *bthost, uint8_t scan_type,
+				uint8_t addr_type, uint8_t filter_policy)
 {
-	struct bt_hci_cmd_le_set_ext_adv_params cp;
-	struct bt_hci_cmd_le_set_ext_adv_enable cp_enable;
+	struct bt_hci_cmd_le_set_scan_parameters cp;
 
 	memset(&cp, 0, sizeof(cp));
+	cp.type = scan_type;
+	cp.own_addr_type = addr_type;
+	cp.filter_policy = filter_policy;
+	send_command(bthost, BT_HCI_CMD_LE_SET_SCAN_PARAMETERS,
+							&cp, sizeof(cp));
+}
+
+void bthost_set_scan_enable(struct bthost *bthost, uint8_t enable)
+{
+	struct bt_hci_cmd_le_set_scan_enable cp;
+
+	memset(&cp, 0, sizeof(cp));
+	cp.enable = enable;
+	send_command(bthost, BT_HCI_CMD_LE_SET_SCAN_ENABLE,
+							&cp, sizeof(cp));
+}
+
+void bthost_set_ext_adv_params(struct bthost *bthost)
+{
+	struct bt_hci_cmd_le_set_ext_adv_params cp;
+
+	memset(&cp, 0, sizeof(cp));
+	cp.handle = 0x01;
 	cp.evt_properties = cpu_to_le16(0x0013);
 	send_command(bthost, BT_HCI_CMD_LE_SET_EXT_ADV_PARAMS,
 							&cp, sizeof(cp));
+}
 
-	cp_enable.enable = enable;
-	send_command(bthost, BT_HCI_CMD_LE_SET_EXT_ADV_ENABLE, &cp_enable,
-					sizeof(cp_enable));
+void bthost_set_ext_adv_enable(struct bthost *bthost, uint8_t enable)
+{
+	struct bt_hci_cmd_le_set_ext_adv_enable *cp_enable;
+	struct bt_hci_cmd_ext_adv_set *cp_set;
+	uint8_t cp[6];
+
+	memset(cp, 0, 6);
+
+	cp_enable = (struct bt_hci_cmd_le_set_ext_adv_enable *)cp;
+	cp_set = (struct bt_hci_cmd_ext_adv_set *)(cp + sizeof(*cp_enable));
+
+	cp_enable->enable = enable;
+	cp_enable->num_of_sets = 1;
+	cp_set->handle = 1;
+
+	send_command(bthost, BT_HCI_CMD_LE_SET_EXT_ADV_ENABLE, cp, 6);
+}
+
+void bthost_set_pa_params(struct bthost *bthost)
+{
+	struct bt_hci_cmd_le_set_pa_params cp;
+
+	memset(&cp, 0, sizeof(cp));
+	cp.handle = 0x01;
+	send_command(bthost, BT_HCI_CMD_LE_SET_PA_PARAMS, &cp, sizeof(cp));
+}
+
+void bthost_set_pa_enable(struct bthost *bthost, uint8_t enable)
+{
+	struct bt_hci_cmd_le_set_pa_enable cp;
+
+	memset(&cp, 0, sizeof(cp));
+	cp.enable = enable;
+	cp.handle = 0x01;
+	send_command(bthost, BT_HCI_CMD_LE_SET_PA_ENABLE, &cp, sizeof(cp));
+}
+
+void bthost_create_big(struct bthost *bthost, uint8_t num_bis,
+				uint8_t enc, const uint8_t *bcode)
+{
+	struct bt_hci_cmd_le_create_big cp;
+
+	memset(&cp, 0, sizeof(cp));
+	cp.handle = 0x01;
+	cp.adv_handle = 0x01;
+	cp.num_bis = num_bis;
+	put_le24(10000, cp.bis.sdu_interval);
+	cp.bis.sdu = 40;
+	cp.bis.latency = cpu_to_le16(10);
+	cp.bis.rtn = 0x02;
+	cp.bis.phy = 0x02;
+	cp.bis.encryption = enc;
+	memcpy(cp.bis.bcode, bcode, sizeof(cp.bis.bcode));
+	send_command(bthost, BT_HCI_CMD_LE_CREATE_BIG, &cp, sizeof(cp));
+}
+
+bool bthost_search_ext_adv_addr(struct bthost *bthost, const uint8_t *addr)
+{
+	const struct queue_entry *entry;
+
+	if (queue_isempty(bthost->le_ext_adv))
+		return false;
+
+	for (entry = queue_get_entries(bthost->le_ext_adv); entry;
+							entry = entry->next) {
+		struct le_ext_adv *le_ext_adv = entry->data;
+
+		if (!memcmp(le_ext_adv->addr, addr, 6))
+			return true;
+	}
+
+	return false;
+}
+
+void bthost_set_cig_params(struct bthost *bthost, uint8_t cig_id,
+				uint8_t cis_id, const struct bt_iso_qos *qos)
+{
+	struct bt_hci_cmd_le_set_cig_params *cp;
+
+	cp = malloc(sizeof(*cp) + sizeof(*cp->cis));
+	memset(cp, 0, sizeof(*cp) + sizeof(*cp->cis));
+	cp->cig_id = cig_id;
+	put_le24(qos->ucast.in.interval ? qos->ucast.in.interval :
+				qos->ucast.out.interval, cp->c_interval);
+	put_le24(qos->ucast.out.interval ? qos->ucast.out.interval :
+				qos->ucast.in.interval, cp->p_interval);
+	cp->c_latency = cpu_to_le16(qos->ucast.in.latency ?
+				qos->ucast.in.latency : qos->ucast.out.latency);
+	cp->p_latency = cpu_to_le16(qos->ucast.out.latency ?
+				qos->ucast.out.latency : qos->ucast.in.latency);
+	cp->num_cis = 0x01;
+	cp->cis[0].cis_id = cis_id;
+	cp->cis[0].c_sdu = qos->ucast.in.sdu;
+	cp->cis[0].p_sdu = qos->ucast.out.sdu;
+	cp->cis[0].c_phy = qos->ucast.in.phy ? qos->ucast.in.phy :
+							qos->ucast.out.phy;
+	cp->cis[0].p_phy = qos->ucast.out.phy ? qos->ucast.out.phy :
+							qos->ucast.in.phy;
+	cp->cis[0].c_rtn = qos->ucast.in.rtn;
+	cp->cis[0].p_rtn = qos->ucast.out.rtn;
+
+	send_command(bthost, BT_HCI_CMD_LE_SET_CIG_PARAMS, cp,
+				sizeof(*cp) + sizeof(*cp->cis));
+	free(cp);
+}
+
+void bthost_create_cis(struct bthost *bthost, uint16_t cis_handle,
+						uint16_t acl_handle)
+{
+	struct bt_hci_cmd_le_create_cis *cp;
+
+	cp = malloc(sizeof(*cp) + sizeof(*cp->cis));
+	memset(cp, 0, sizeof(*cp) + sizeof(*cp->cis));
+	cp->num_cis = 0x01;
+	cp->cis[0].cis_handle = cpu_to_le16(cis_handle);
+	cp->cis[0].acl_handle = cpu_to_le16(acl_handle);
+
+	send_command(bthost, BT_HCI_CMD_LE_CREATE_CIS, cp,
+				sizeof(*cp) + sizeof(*cp->cis));
+	free(cp);
 }
 
 void bthost_write_ssp_mode(struct bthost *bthost, uint8_t mode)

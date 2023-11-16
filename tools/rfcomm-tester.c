@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Intel Corporation. All rights reserved.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
- *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -50,13 +37,17 @@ struct test_data {
 	struct hciemu *hciemu;
 	enum hciemu_type hciemu_type;
 	const void *test_data;
+	GIOChannel *io;
 	unsigned int io_id;
 	uint16_t conn_handle;
+	uint16_t send_len;
+	uint16_t recv_len;
 };
 
 struct rfcomm_client_data {
 	uint8_t server_channel;
 	uint8_t client_channel;
+	bool close;
 	int expected_connect_err;
 	const uint8_t *send_data;
 	const uint8_t *read_data;
@@ -72,7 +63,7 @@ struct rfcomm_server_data {
 	uint16_t data_len;
 };
 
-static void mgmt_debug(const char *str, void *user_data)
+static void print_debug(const char *str, void *user_data)
 {
 	const char *prefix = user_data;
 
@@ -177,6 +168,9 @@ static void read_index_list_callback(uint8_t status, uint16_t length,
 		tester_pre_setup_failed();
 	}
 
+	if (tester_use_debug())
+		hciemu_set_debug(data->hciemu, print_debug, "hciemu: ", NULL);
+
 	tester_print("New hciemu instance created");
 }
 
@@ -192,7 +186,7 @@ static void test_pre_setup(const void *test_data)
 	}
 
 	if (tester_use_debug())
-		mgmt_set_debug(data->mgmt, mgmt_debug, "mgmt: ", NULL);
+		mgmt_set_debug(data->mgmt, print_debug, "mgmt: ", NULL);
 
 	mgmt_send(data->mgmt, MGMT_OP_READ_INDEX_LIST, MGMT_INDEX_NONE, 0, NULL,
 					read_index_list_callback, NULL, NULL);
@@ -206,6 +200,9 @@ static void test_post_teardown(const void *test_data)
 		g_source_remove(data->io_id);
 		data->io_id = 0;
 	}
+
+	if (data->io)
+		g_io_channel_unref(data->io);
 
 	hciemu_unref(data->hciemu);
 	data->hciemu = NULL;
@@ -301,13 +298,36 @@ const struct rfcomm_client_data connect_success = {
 	.client_channel = 0x0c
 };
 
+const struct rfcomm_client_data connect_close = {
+	.server_channel = 0x0c,
+	.client_channel = 0x0c,
+	.close = true
+};
+
 const uint8_t data[] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 
 const struct rfcomm_client_data connect_send_success = {
 	.server_channel = 0x0c,
 	.client_channel = 0x0c,
 	.data_len = sizeof(data),
-	.send_data = data
+	.send_data = data,
+};
+
+const uint8_t data_32k[32768] = { [0 ... 4095] =  0x00,
+				[4096 ... 8191] =  0x01,
+				[8192 ... 12287] =  0x02,
+				[12288 ... 16383] =  0x03,
+				[16384 ... 20479] =  0x04,
+				[20480 ... 24575] =  0x05,
+				[24576 ... 28671] =  0x06,
+				[28672 ... 32767] =  0x07,
+};
+
+const struct rfcomm_client_data connect_send_32k_success = {
+	.server_channel = 0x0c,
+	.client_channel = 0x0c,
+	.data_len = sizeof(data_32k),
+	.send_data = data_32k,
 };
 
 const struct rfcomm_client_data connect_read_success = {
@@ -430,6 +450,44 @@ static gboolean client_received_data(GIOChannel *io, GIOCondition cond,
 	return false;
 }
 
+static gboolean rc_write_data(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	struct test_data *data = user_data;
+	const struct rfcomm_client_data *cli = data->test_data;
+	int sk;
+	ssize_t ret;
+
+	if (cond & G_IO_NVAL)
+		return false;
+
+	if (cond & (G_IO_HUP | G_IO_ERR))
+		goto done;
+
+	tester_print("Writing %u bytes of data",
+			cli->data_len - data->send_len);
+
+	sk = g_io_channel_unix_get_fd(io);
+
+	ret = write(sk, cli->send_data + data->send_len,
+			cli->data_len - data->send_len);
+	if (ret < 0) {
+		tester_warn("Failed to write %u bytes: %s (%d)",
+				cli->data_len, strerror(errno), errno);
+		tester_test_failed();
+		goto done;
+	}
+
+	data->send_len += ret;
+
+	tester_print("Written %u/%u bytes", data->send_len, cli->data_len);
+
+	/* Don't retry write since that seems to block bthost from receiving */
+done:
+	data->io_id = 0;
+	return false;
+}
+
 static gboolean rc_connect_cb(GIOChannel *io, GIOCondition cond,
 							gpointer user_data)
 {
@@ -455,17 +513,9 @@ static gboolean rc_connect_cb(GIOChannel *io, GIOCondition cond,
 	}
 
 	if (cli->send_data) {
-		ssize_t ret;
-
-		tester_print("Writing %u bytes of data", cli->data_len);
-
-		ret = write(sk, cli->send_data, cli->data_len);
-		if (cli->data_len != ret) {
-			tester_warn("Failed to write %u bytes: %s (%d)",
-					cli->data_len, strerror(errno), errno);
-			tester_test_failed();
-		}
-
+		data->io = g_io_channel_ref(io);
+		cond = G_IO_OUT | G_IO_HUP | G_IO_ERR | G_IO_NVAL;
+		data->io_id = g_io_add_watch(io, cond, rc_write_data, data);
 		return false;
 	} else if (cli->read_data) {
 		g_io_add_watch(io, G_IO_IN, client_received_data, NULL);
@@ -476,10 +526,26 @@ static gboolean rc_connect_cb(GIOChannel *io, GIOCondition cond,
 		return false;
 	}
 
+	data->io = NULL;
+
 	if (err < 0)
 		tester_test_failed();
 	else
 		tester_test_passed();
+
+	return false;
+}
+
+static gboolean rc_close_cb(GIOChannel *io, GIOCondition cond,
+							gpointer user_data)
+{
+	struct test_data *data = tester_get_data();
+
+	data->io_id = 0;
+
+	tester_print("Closed");
+
+	tester_test_passed();
 
 	return false;
 }
@@ -493,16 +559,35 @@ static void client_hook_func(const void *data, uint16_t len,
 
 	tester_print("bthost received %u bytes of data", len);
 
-	if (cli->data_len != len) {
+	if (test_data->recv_len + len > cli->data_len) {
+		tester_print("received more data than expected");
 		tester_test_failed();
 		return;
 	}
 
-	ret = memcmp(cli->send_data, data, len);
-	if (ret)
+	ret = memcmp(cli->send_data + test_data->recv_len, data, len);
+	if (ret) {
 		tester_test_failed();
-	else
-		tester_test_passed();
+		return;
+	}
+
+	test_data->recv_len += len;
+
+	tester_print("bthost received progress %u/%u", test_data->recv_len,
+							cli->data_len);
+
+	if (cli->data_len != test_data->recv_len) {
+		if (cli->data_len != test_data->send_len)
+			test_data->io_id = g_io_add_watch(test_data->io,
+						     G_IO_OUT | G_IO_HUP |
+						     G_IO_ERR | G_IO_NVAL,
+						     rc_write_data, test_data);
+		return;
+	}
+
+	test_data->recv_len = 0;
+
+	tester_test_passed();
 }
 
 static void server_hook_func(const void *data, uint16_t len,
@@ -544,7 +629,7 @@ static void test_connect(const void *test_data)
 	struct test_data *data = tester_get_data();
 	struct bthost *bthost = hciemu_client_get_host(data->hciemu);
 	const struct rfcomm_client_data *cli = data->test_data;
-	const uint8_t *client_addr, *master_addr;
+	const uint8_t *client_addr, *central_addr;
 	GIOChannel *io;
 	int sk;
 
@@ -552,10 +637,10 @@ static void test_connect(const void *test_data)
 	bthost_add_rfcomm_server(bthost, cli->server_channel,
 						rfcomm_connect_cb, NULL);
 
-	master_addr = hciemu_get_master_bdaddr(data->hciemu);
+	central_addr = hciemu_get_central_bdaddr(data->hciemu);
 	client_addr = hciemu_get_client_bdaddr(data->hciemu);
 
-	sk = create_rfcomm_sock((bdaddr_t *) master_addr, 0);
+	sk = create_rfcomm_sock((bdaddr_t *) central_addr, 0);
 
 	if (connect_rfcomm_sock(sk, (const bdaddr_t *) client_addr,
 					cli->client_channel) < 0) {
@@ -565,13 +650,20 @@ static void test_connect(const void *test_data)
 	}
 
 	io = g_io_channel_unix_new(sk);
-	g_io_channel_set_close_on_unref(io, TRUE);
-
-	data->io_id = g_io_add_watch(io, G_IO_OUT, rc_connect_cb, NULL);
-
-	g_io_channel_unref(io);
 
 	tester_print("Connect in progress %d", sk);
+
+	if (cli->close) {
+		data->io_id = g_io_add_watch(io, G_IO_NVAL, rc_close_cb, NULL);
+		close(sk);
+		tester_print("Close socket %d", sk);
+	} else {
+		g_io_channel_set_close_on_unref(io, TRUE);
+		data->io_id = g_io_add_watch(io, G_IO_OUT, rc_connect_cb,
+						NULL);
+	}
+
+	g_io_channel_unref(io);
 }
 
 static gboolean server_received_data(GIOChannel *io, GIOCondition cond,
@@ -685,14 +777,14 @@ static void test_server(const void *test_data)
 {
 	struct test_data *data = tester_get_data();
 	const struct rfcomm_server_data *srv = data->test_data;
-	const uint8_t *master_addr;
+	const uint8_t *central_addr;
 	struct bthost *bthost;
 	GIOChannel *io;
 	int sk;
 
-	master_addr = hciemu_get_master_bdaddr(data->hciemu);
+	central_addr = hciemu_get_central_bdaddr(data->hciemu);
 
-	sk = create_rfcomm_sock((bdaddr_t *) master_addr, srv->server_channel);
+	sk = create_rfcomm_sock((bdaddr_t *) central_addr, srv->server_channel);
 	if (sk < 0) {
 		tester_test_failed();
 		return;
@@ -717,7 +809,7 @@ static void test_server(const void *test_data)
 	bthost = hciemu_client_get_host(data->hciemu);
 	bthost_set_connect_cb(bthost, client_new_conn, data);
 
-	bthost_hci_connect(bthost, master_addr, BDADDR_BREDR);
+	bthost_hci_connect(bthost, central_addr, BDADDR_BREDR);
 }
 
 #define test_rfcomm(name, data, setup, func) \
@@ -726,7 +818,7 @@ static void test_server(const void *test_data)
 		user = malloc(sizeof(struct test_data)); \
 		if (!user) \
 			break; \
-		user->hciemu_type = HCIEMU_TYPE_BREDR; \
+		user->hciemu_type = HCIEMU_TYPE_BREDRLE52; \
 		user->test_data = data; \
 		user->io_id = 0; \
 		tester_add_full(name, data, \
@@ -745,11 +837,17 @@ int main(int argc, char *argv[])
 	test_rfcomm("Basic RFCOMM Socket Client - Write Success",
 				&connect_send_success, setup_powered_client,
 				test_connect);
+	test_rfcomm("Basic RFCOMM Socket Client - Write 32k Success",
+				&connect_send_32k_success, setup_powered_client,
+				test_connect);
 	test_rfcomm("Basic RFCOMM Socket Client - Read Success",
 				&connect_read_success, setup_powered_client,
 				test_connect);
 	test_rfcomm("Basic RFCOMM Socket Client - Conn Refused",
 			&connect_nval, setup_powered_client, test_connect);
+	test_rfcomm("Basic RFCOMM Socket Client - Close",
+				&connect_close, setup_powered_client,
+				test_connect);
 	test_rfcomm("Basic RFCOMM Socket Server - Success", &listen_success,
 					setup_powered_server, test_server);
 	test_rfcomm("Basic RFCOMM Socket Server - Write Success",

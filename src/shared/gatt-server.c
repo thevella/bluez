@@ -1,23 +1,11 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Google Inc.
+ *  Copyright 2023 NXP
  *
- *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
  *
  */
 
@@ -53,6 +41,9 @@
 #define DEFAULT_MAX_PREP_QUEUE_LEN 30
 
 #define NFY_MULT_TIMEOUT 10
+
+#define DBG(_server, _format, arg...) \
+	gatt_log(_server, "%s:%s() " _format, __FILE__, __func__, ## arg)
 
 struct async_read_op {
 	struct bt_att_chan *chan;
@@ -121,9 +112,6 @@ struct bt_gatt_server {
 	struct queue *prep_queue;
 	unsigned int max_prep_queue_len;
 
-	struct async_read_op *pending_read_op;
-	struct async_write_op *pending_write_op;
-
 	bt_gatt_server_debug_func_t debug_callback;
 	bt_gatt_server_destroy_func_t debug_destroy;
 	void *debug_data;
@@ -134,10 +122,25 @@ struct bt_gatt_server {
 	struct nfy_mult_data *nfy_mult;
 };
 
+static void notify_multiple_free(struct bt_gatt_server *server)
+{
+	if (!server->nfy_mult)
+		return;
+
+	if (server->nfy_mult->id)
+		timeout_remove(server->nfy_mult->id);
+
+	free(server->nfy_mult->pdu);
+	free(server->nfy_mult);
+	server->nfy_mult = NULL;
+}
+
 static void bt_gatt_server_free(struct bt_gatt_server *server)
 {
 	if (server->debug_destroy)
 		server->debug_destroy(server->debug_data);
+
+	notify_multiple_free(server);
 
 	bt_att_unregister(server->att, server->mtu_id);
 	bt_att_unregister(server->att, server->read_by_grp_type_id);
@@ -152,12 +155,6 @@ static void bt_gatt_server_free(struct bt_gatt_server *server)
 	bt_att_unregister(server->att, server->read_multiple_vl_id);
 	bt_att_unregister(server->att, server->prep_write_id);
 	bt_att_unregister(server->att, server->exec_write_id);
-
-	if (server->pending_read_op)
-		server->pending_read_op->server = NULL;
-
-	if (server->pending_write_op)
-		server->pending_write_op->server = NULL;
 
 	queue_destroy(server->prep_queue, prep_write_data_destroy);
 
@@ -255,6 +252,18 @@ static bool encode_read_by_grp_type_rsp(struct gatt_db *db, struct queue *q,
 	return true;
 }
 
+static void gatt_log(struct bt_gatt_server *server, const char *format, ...)
+{
+	va_list ap;
+
+	if (!server || !format || !server->debug_callback)
+		return;
+
+	va_start(ap, format);
+	util_debug_va(server->debug_callback, server->debug_data, format, ap);
+	va_end(ap);
+}
+
 static void read_by_grp_type_cb(struct bt_att_chan *chan, uint8_t opcode,
 					const void *pdu, uint16_t length,
 					void *user_data)
@@ -281,9 +290,7 @@ static void read_by_grp_type_cb(struct bt_att_chan *chan, uint8_t opcode,
 	end = get_le16(pdu + 2);
 	get_uuid_le(pdu + 4, length - 4, &type);
 
-	util_debug(server->debug_callback, server->debug_data,
-				"Read By Grp Type - start: 0x%04x end: 0x%04x",
-				start, end);
+	DBG(server, "Read By Grp Type - start: 0x%04x end: 0x%04x", start, end);
 
 	if (!start || !end) {
 		ecode = BT_ATT_ERROR_INVALID_HANDLE;
@@ -337,9 +344,7 @@ error:
 
 static void async_read_op_destroy(struct async_read_op *op)
 {
-	if (op->server)
-		op->server->pending_read_op = NULL;
-
+	bt_gatt_server_unref(op->server);
 	queue_destroy(op->db_data, NULL);
 	free(op->pdu);
 	free(op);
@@ -355,11 +360,6 @@ static void read_by_type_read_complete_cb(struct gatt_db_attribute *attr,
 	struct bt_gatt_server *server = op->server;
 	uint16_t mtu;
 	uint16_t handle;
-
-	if (!server) {
-		async_read_op_destroy(op);
-		return;
-	}
 
 	mtu = bt_att_get_mtu(server->att);
 	handle = gatt_db_attribute_get_handle(attr);
@@ -473,9 +473,7 @@ static void process_read_by_type(struct async_read_op *op)
 		return;
 	}
 
-	ecode = check_permissions(server, attr, BT_ATT_PERM_READ |
-						BT_ATT_PERM_READ_AUTHEN |
-						BT_ATT_PERM_READ_ENCRYPT);
+	ecode = check_permissions(server, attr, BT_ATT_PERM_READ_MASK);
 	if (ecode)
 		goto error;
 
@@ -514,9 +512,7 @@ static void read_by_type_cb(struct bt_att_chan *chan, uint8_t opcode,
 	end = get_le16(pdu + 2);
 	get_uuid_le(pdu + 4, length - 4, &type);
 
-	util_debug(server->debug_callback, server->debug_data,
-				"Read By Type - start: 0x%04x end: 0x%04x",
-				start, end);
+	DBG(server, "Read By Type - start: 0x%04x end: 0x%04x", start, end);
 
 	if (!start || !end) {
 		ecode = BT_ATT_ERROR_INVALID_HANDLE;
@@ -537,11 +533,6 @@ static void read_by_type_cb(struct bt_att_chan *chan, uint8_t opcode,
 		goto error;
 	}
 
-	if (server->pending_read_op) {
-		ecode = BT_ATT_ERROR_UNLIKELY;
-		goto error;
-	}
-
 	op = new0(struct async_read_op, 1);
 	op->pdu = malloc(bt_att_get_mtu(server->att));
 	if (!op->pdu) {
@@ -552,9 +543,8 @@ static void read_by_type_cb(struct bt_att_chan *chan, uint8_t opcode,
 
 	op->chan = chan;
 	op->opcode = opcode;
-	op->server = server;
+	op->server = bt_gatt_server_ref(server);
 	op->db_data = q;
-	server->pending_read_op = op;
 
 	process_read_by_type(op);
 
@@ -642,9 +632,7 @@ static void find_info_cb(struct bt_att_chan *chan, uint8_t opcode,
 	start = get_le16(pdu);
 	end = get_le16(pdu + 2);
 
-	util_debug(server->debug_callback, server->debug_data,
-					"Find Info - start: 0x%04x end: 0x%04x",
-					start, end);
+	DBG(server, "Find Info - start: 0x%04x end: 0x%04x", start, end);
 
 	if (!start || !end) {
 		ecode = BT_ATT_ERROR_INVALID_HANDLE;
@@ -745,9 +733,10 @@ static void find_by_type_val_cb(struct bt_att_chan *chan, uint8_t opcode,
 	end = get_le16(pdu + 2);
 	uuid16 = get_le16(pdu + 4);
 
-	util_debug(server->debug_callback, server->debug_data,
-			"Find By Type Value - start: 0x%04x end: 0x%04x uuid: 0x%04x",
-			start, end, uuid16);
+	DBG(server,
+	    "Find By Type Value - start: 0x%04x end: 0x%04x uuid: 0x%04x",
+	    start, end, uuid16);
+
 	ehandle = start;
 	if (start > end) {
 		data.ecode = BT_ATT_ERROR_INVALID_HANDLE;
@@ -777,9 +766,7 @@ error:
 
 static void async_write_op_destroy(struct async_write_op *op)
 {
-	if (op->server)
-		op->server->pending_write_op = NULL;
-
+	bt_gatt_server_unref(op->server);
 	free(op);
 }
 
@@ -790,13 +777,12 @@ static void write_complete_cb(struct gatt_db_attribute *attr, int err,
 	struct bt_gatt_server *server = op->server;
 	uint16_t handle;
 
-	if (!server || op->opcode == BT_ATT_OP_WRITE_CMD) {
+	if (op->opcode == BT_ATT_OP_WRITE_CMD) {
 		async_write_op_destroy(op);
 		return;
 	}
 
-	util_debug(server->debug_callback, server->debug_data,
-						"Write Complete: err %d", err);
+	DBG(server, "Write Complete: err %d", err);
 
 	handle = gatt_db_attribute_get_handle(attr);
 
@@ -816,6 +802,20 @@ static uint8_t authorize_req(struct bt_gatt_server *server,
 
 	return server->authorize(server->att, opcode, handle,
 						server->authorize_data);
+}
+
+static uint8_t check_length(uint16_t length, uint16_t offset)
+{
+	if (length > BT_ATT_MAX_VALUE_LEN)
+		return BT_ATT_ERROR_INVALID_ATTRIBUTE_VALUE_LEN;
+
+	if (offset > BT_ATT_MAX_VALUE_LEN)
+		return BT_ATT_ERROR_INVALID_OFFSET;
+
+	if (length + offset > BT_ATT_MAX_VALUE_LEN)
+		return BT_ATT_ERROR_INVALID_ATTRIBUTE_VALUE_LEN;
+
+	return 0;
 }
 
 static void write_cb(struct bt_att_chan *chan, uint8_t opcode, const void *pdu,
@@ -843,27 +843,21 @@ static void write_cb(struct bt_att_chan *chan, uint8_t opcode, const void *pdu,
 		goto error;
 	}
 
-	util_debug(server->debug_callback, server->debug_data,
-				"Write %s - handle: 0x%04x",
-				(opcode == BT_ATT_OP_WRITE_REQ) ? "Req" : "Cmd",
-				handle);
+	DBG(server, "Write %s - handle: 0x%04x",
+		(opcode == BT_ATT_OP_WRITE_REQ) ? "Req" : "Cmd", handle);
 
-	ecode = check_permissions(server, attr, BT_ATT_PERM_WRITE |
-						BT_ATT_PERM_WRITE_AUTHEN |
-						BT_ATT_PERM_WRITE_ENCRYPT);
+	ecode = check_length(length - 2, 0);
 	if (ecode)
 		goto error;
 
-	if (server->pending_write_op) {
-		ecode = BT_ATT_ERROR_UNLIKELY;
+	ecode = check_permissions(server, attr, BT_ATT_PERM_WRITE_MASK);
+	if (ecode)
 		goto error;
-	}
 
 	op = new0(struct async_write_op, 1);
 	op->chan = chan;
-	op->server = server;
+	op->server = bt_gatt_server_ref(server);
 	op->opcode = opcode;
-	server->pending_write_op = op;
 
 	if (gatt_db_attribute_write(attr, 0, pdu + 2, length - 2, opcode,
 							server->att,
@@ -914,13 +908,7 @@ static void read_complete_cb(struct gatt_db_attribute *attr, int err,
 	uint16_t mtu;
 	uint16_t handle;
 
-	if (!server) {
-		async_read_op_destroy(op);
-		return;
-	}
-
-	util_debug(server->debug_callback, server->debug_data,
-				"Read Complete: err %d", err);
+	DBG(server, "Read Complete: err %d", err);
 
 	mtu = bt_att_get_mtu(server->att);
 	handle = gatt_db_attribute_get_handle(attr);
@@ -956,27 +944,17 @@ static void handle_read_req(struct bt_att_chan *chan,
 		goto error;
 	}
 
-	util_debug(server->debug_callback, server->debug_data,
-			"Read %sReq - handle: 0x%04x",
-			opcode == BT_ATT_OP_READ_BLOB_REQ ? "Blob " : "",
-			handle);
+	DBG(server, "Read %sReq - handle: 0x%04x",
+		opcode == BT_ATT_OP_READ_BLOB_REQ ? "Blob " : "", handle);
 
-	ecode = check_permissions(server, attr, BT_ATT_PERM_READ |
-						BT_ATT_PERM_READ_AUTHEN |
-						BT_ATT_PERM_READ_ENCRYPT);
+	ecode = check_permissions(server, attr, BT_ATT_PERM_READ_MASK);
 	if (ecode)
 		goto error;
-
-	if (server->pending_read_op) {
-		ecode = BT_ATT_ERROR_UNLIKELY;
-		goto error;
-	}
 
 	op = new0(struct async_read_op, 1);
 	op->chan = chan;
 	op->opcode = opcode;
-	op->server = server;
-	server->pending_read_op = op;
+	op->server = bt_gatt_server_ref(server);
 
 	if (gatt_db_attribute_read(attr, offset, opcode, server->att,
 							read_complete_cb, op))
@@ -1105,9 +1083,8 @@ static void read_multiple_complete_cb(struct gatt_db_attribute *attr, int err,
 		goto error;
 	}
 
-	ecode = check_permissions(data->server, next_attr, BT_ATT_PERM_READ |
-						BT_ATT_PERM_READ_AUTHEN |
-						BT_ATT_PERM_READ_ENCRYPT);
+	ecode = check_permissions(data->server, next_attr,
+						BT_ATT_PERM_READ_MASK);
 	if (ecode)
 		goto error;
 
@@ -1162,16 +1139,13 @@ static void read_multiple_cb(struct bt_att_chan *chan, uint8_t opcode,
 	}
 
 	data = read_mult_data_new(server, chan, opcode, length / 2);
-	if (!data)
-		goto error;
 
 	for (i = 0; i < data->num_handles; i++)
 		data->handles[i] = get_le16(pdu + i * 2);
 
 	handle = data->handles[0];
 
-	util_debug(server->debug_callback, server->debug_data,
-			"%s Req - %zu handles, 1st: 0x%04x",
+	DBG(server, "%s Req - %zu handles, 1st: 0x%04x",
 			data->opcode == BT_ATT_OP_READ_MULT_REQ ?
 			"Read Multiple" : "Read Multiple Variable Length",
 			data->num_handles, handle);
@@ -1183,9 +1157,7 @@ static void read_multiple_cb(struct bt_att_chan *chan, uint8_t opcode,
 		goto error;
 	}
 
-	ecode = check_permissions(data->server, attr, BT_ATT_PERM_READ |
-						BT_ATT_PERM_READ_AUTHEN |
-						BT_ATT_PERM_READ_ENCRYPT);
+	ecode = check_permissions(data->server, attr, BT_ATT_PERM_READ_MASK);
 	if (ecode)
 		goto error;
 
@@ -1359,12 +1331,13 @@ static void prep_write_cb(struct bt_att_chan *chan, uint8_t opcode,
 		goto error;
 	}
 
-	util_debug(server->debug_callback, server->debug_data,
-				"Prep Write Req - handle: 0x%04x", handle);
+	DBG(server, "Prep Write Req - handle: 0x%04x", handle);
 
-	ecode = check_permissions(server, attr, BT_ATT_PERM_WRITE |
-						BT_ATT_PERM_WRITE_AUTHEN |
-						BT_ATT_PERM_WRITE_ENCRYPT);
+	ecode = check_length(length - 4, offset);
+	if (ecode)
+		goto error;
+
+	ecode = check_permissions(server, attr, BT_ATT_PERM_WRITE_MASK);
 	if (ecode)
 		goto error;
 
@@ -1478,8 +1451,7 @@ static void exec_write_cb(struct bt_att_chan *chan, uint8_t opcode,
 
 	flags = ((uint8_t *) pdu)[0];
 
-	util_debug(server->debug_callback, server->debug_data,
-				"Exec Write Req - flags: 0x%02x", flags);
+	DBG(server, "Exec Write Req - flags: 0x%02x", flags);
 
 	if (flags == 0x00)
 		write = false;
@@ -1550,8 +1522,7 @@ static void exchange_mtu_cb(struct bt_att_chan *chan, uint8_t opcode,
 	server->mtu = final_mtu;
 	bt_att_set_mtu(server->att, final_mtu);
 
-	util_debug(server->debug_callback, server->debug_data,
-			"MTU exchange complete, with MTU: %u", final_mtu);
+	DBG(server, "MTU exchange complete, with MTU: %u", final_mtu);
 }
 
 static bool gatt_server_register_att_handlers(struct bt_gatt_server *server)
@@ -1740,19 +1711,39 @@ bool bt_gatt_server_set_debug(struct bt_gatt_server *server,
 	return true;
 }
 
+static void notify_multiple_timeout_remove(struct bt_gatt_server *server)
+{
+	if (!server->nfy_mult->id)
+		return;
+
+	timeout_remove(server->nfy_mult->id);
+	server->nfy_mult->id = 0;
+}
+
 static bool notify_multiple(void *user_data)
 {
 	struct bt_gatt_server *server = user_data;
+
+	server->nfy_mult->id = 0;
 
 	bt_att_send(server->att, BT_ATT_OP_HANDLE_NFY_MULT,
 			server->nfy_mult->pdu, server->nfy_mult->offset, NULL,
 			NULL, NULL);
 
-	free(server->nfy_mult->pdu);
-	free(server->nfy_mult);
-	server->nfy_mult = NULL;
+	notify_multiple_free(server);
 
 	return false;
+}
+
+static bool notify_append_le16(struct nfy_mult_data *data, uint16_t value)
+{
+	if (data->offset + sizeof(value) > data->len)
+		return false;
+
+	put_le16(value, data->pdu + data->offset);
+	data->offset += sizeof(value);
+
+	return true;
 }
 
 bool bt_gatt_server_send_notification(struct bt_gatt_server *server,
@@ -1765,8 +1756,18 @@ bool bt_gatt_server_send_notification(struct bt_gatt_server *server,
 	if (!server || (length && !value))
 		return false;
 
-	if (multiple)
+	if (multiple) {
 		data = server->nfy_mult;
+
+		/* flush buffered data if this request hits buffer size limit */
+		if (data && data->offset > 0 &&
+				data->len - data->offset < 4 + length) {
+			notify_multiple_timeout_remove(server);
+			notify_multiple(server);
+			/* data has been freed by notify_multiple */
+			data = NULL;
+		}
+	}
 
 	if (!data) {
 		data = new0(struct nfy_mult_data, 1);
@@ -1774,17 +1775,20 @@ bool bt_gatt_server_send_notification(struct bt_gatt_server *server,
 		data->pdu = malloc(data->len);
 	}
 
-	put_le16(handle, data->pdu + data->offset);
-	data->offset += 2;
-
-	length = MIN(data->len - data->offset, length);
+	if (!notify_append_le16(data, handle))
+		goto error;
 
 	if (multiple) {
-		put_le16(length, data->pdu + data->offset);
-		data->offset += 2;
+		length = MIN(data->len - data->offset - 2, length);
+		if (!notify_append_le16(data, length))
+			goto error;
+	} else {
+		length = MIN(data->len - data->offset, length);
 	}
 
-	memcpy(data->pdu + data->offset, value, length);
+	if (value)
+		memcpy(data->pdu + data->offset, value, length);
+
 	data->offset += length;
 
 	if (multiple) {
@@ -1805,6 +1809,12 @@ bool bt_gatt_server_send_notification(struct bt_gatt_server *server,
 	free(data);
 
 	return result;
+
+error:
+	if (data)
+		free(data);
+
+	return false;
 }
 
 struct ind_data {

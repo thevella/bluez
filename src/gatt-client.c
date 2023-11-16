@@ -1,19 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
  *
  *  Copyright (C) 2014  Google Inc.
  *
- *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
- *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
  *
  */
 
@@ -39,7 +30,7 @@
 
 #include "log.h"
 #include "error.h"
-#include "hcid.h"
+#include "btd.h"
 #include "adapter.h"
 #include "device.h"
 #include "src/shared/io.h"
@@ -113,6 +104,7 @@ struct characteristic {
 	char *path;
 
 	unsigned int ready_id;
+	unsigned int exchange_id;
 	struct sock_io *write_io;
 	struct sock_io *notify_io;
 
@@ -143,6 +135,17 @@ static bool uuid_cmp(const bt_uuid_t *uuid, uint16_t u16)
 	bt_uuid16_create(&uuid16, u16);
 
 	return bt_uuid_cmp(uuid, &uuid16) == 0;
+}
+
+static gboolean descriptor_get_handle(const GDBusPropertyTable *property,
+					DBusMessageIter *iter, void *data)
+{
+	struct service *desc = data;
+	uint16_t handle = desc->start_handle;
+
+	dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT16, &handle);
+
+	return TRUE;
 }
 
 static gboolean descriptor_get_uuid(const GDBusPropertyTable *property,
@@ -377,7 +380,8 @@ static void desc_read_cb(bool success, uint8_t att_ecode,
 	}
 
 	/* Read the stored data from db */
-	if (!gatt_db_attribute_read(desc->attr, 0, 0, NULL, read_op_cb, op)) {
+	if (!gatt_db_attribute_read(desc->attr, op->offset, 0, NULL, read_op_cb,
+									op)) {
 		error("Failed to read database");
 		att_ecode = BT_ATT_ERROR_UNLIKELY;
 		goto fail;
@@ -642,6 +646,7 @@ static DBusMessage *descriptor_write_value(DBusConnection *conn,
 }
 
 static const GDBusPropertyTable descriptor_properties[] = {
+	{ "Handle", "q", descriptor_get_handle },
 	{ "UUID", "s", descriptor_get_uuid },
 	{ "Characteristic", "o", descriptor_get_characteristic, },
 	{ "Value", "ay", descriptor_get_value, NULL, descriptor_value_exists },
@@ -718,6 +723,17 @@ static void unregister_descriptor(void *data)
 
 	g_dbus_unregister_interface(btd_get_dbus_connection(), desc->path,
 							GATT_DESCRIPTOR_IFACE);
+}
+
+static gboolean characteristic_get_handle(const GDBusPropertyTable *property,
+					DBusMessageIter *iter, void *data)
+{
+	struct characteristic *chrc = data;
+	uint16_t handle = chrc->handle;
+
+	dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT16, &handle);
+
+	return TRUE;
 }
 
 static gboolean characteristic_get_uuid(const GDBusPropertyTable *property,
@@ -881,6 +897,30 @@ characteristic_notify_acquired_exists(const GDBusPropertyTable *property,
 	return (chrc->props & BT_GATT_CHRC_PROP_NOTIFY);
 }
 
+static gboolean characteristic_get_mtu(const GDBusPropertyTable *property,
+				       DBusMessageIter *iter, void *data)
+{
+	struct characteristic *chrc = data;
+	struct bt_gatt_client *gatt = chrc->service->client->gatt;
+	struct bt_att *att;
+	uint16_t mtu;
+
+	att = bt_gatt_client_get_att(gatt);
+	mtu = att ? bt_att_get_mtu(att) : BT_ATT_DEFAULT_LE_MTU;
+
+	dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT16, &mtu);
+
+	return TRUE;
+}
+
+static gboolean characteristic_mtu_exists(const GDBusPropertyTable *property,
+								void *data)
+{
+	struct characteristic *chrc = data;
+
+	return chrc->service->client->gatt ? TRUE : FALSE;
+}
+
 static void write_characteristic_cb(struct gatt_db_attribute *attr, int err,
 								void *user_data)
 {
@@ -915,7 +955,8 @@ static void chrc_read_cb(bool success, uint8_t att_ecode, const uint8_t *value,
 	}
 
 	/* Read the stored data from db */
-	if (!gatt_db_attribute_read(chrc->attr, 0, 0, NULL, read_op_cb, op)) {
+	if (!gatt_db_attribute_read(chrc->attr, op->offset, 0, NULL, read_op_cb,
+									op)) {
 		error("Failed to read database");
 		att_ecode = BT_ATT_ERROR_UNLIKELY;
 		goto fail;
@@ -1545,6 +1586,12 @@ static DBusMessage *characteristic_start_notify(DBusConnection *conn,
 	const char *sender = dbus_message_get_sender(msg);
 	struct async_dbus_op *op;
 	struct notify_client *client;
+	struct btd_device *device = chrc->service->client->device;
+
+	if (device_is_disconnecting(device)) {
+		error("Device is disconnecting. StartNotify is not allowed.");
+		return btd_error_not_connected(msg);
+	}
 
 	if (chrc->notify_io)
 		return btd_error_not_permitted(msg, "Notify acquired");
@@ -1636,6 +1683,7 @@ static DBusMessage *characteristic_stop_notify(DBusConnection *conn,
 }
 
 static const GDBusPropertyTable characteristic_properties[] = {
+	{ "Handle", "q", characteristic_get_handle },
 	{ "UUID", "s", characteristic_get_uuid, NULL, NULL },
 	{ "Service", "o", characteristic_get_service, NULL, NULL },
 	{ "Value", "ay", characteristic_get_value, NULL,
@@ -1647,6 +1695,7 @@ static const GDBusPropertyTable characteristic_properties[] = {
 				characteristic_write_acquired_exists },
 	{ "NotifyAcquired", "b", characteristic_get_notify_acquired, NULL,
 				characteristic_notify_acquired_exists },
+	{ "MTU", "q", characteristic_get_mtu, NULL, characteristic_mtu_exists },
 	{ }
 };
 
@@ -1688,6 +1737,8 @@ static void remove_client(void *data)
 static void characteristic_free(void *data)
 {
 	struct characteristic *chrc = data;
+	struct bt_gatt_client *gatt = chrc->service->client->gatt;
+	struct bt_att *att;
 
 	/* List should be empty here */
 	queue_destroy(chrc->descs, NULL);
@@ -1704,8 +1755,20 @@ static void characteristic_free(void *data)
 
 	queue_destroy(chrc->notify_clients, remove_client);
 
+	att = bt_gatt_client_get_att(gatt);
+	if (att)
+		bt_att_unregister_exchange(att, chrc->exchange_id);
+
 	g_free(chrc->path);
 	free(chrc);
+}
+
+static void att_exchange(uint16_t mtu, void *user_data)
+{
+	struct characteristic *chrc = user_data;
+
+	g_dbus_emit_property_changed(btd_get_dbus_connection(), chrc->path,
+					GATT_CHARACTERISTIC_IFACE, "MTU");
 }
 
 static struct characteristic *characteristic_create(
@@ -1713,6 +1776,8 @@ static struct characteristic *characteristic_create(
 						struct service *service)
 {
 	struct characteristic *chrc;
+	struct bt_gatt_client *gatt = service->client->gatt;
+	struct bt_att *att;
 	bt_uuid_t uuid;
 
 	chrc = new0(struct characteristic, 1);
@@ -1751,6 +1816,11 @@ static struct characteristic *characteristic_create(
 		return NULL;
 	}
 
+	att = bt_gatt_client_get_att(gatt);
+	if (att)
+		chrc->exchange_id = bt_att_register_exchange(att, att_exchange,
+								chrc, NULL);
+
 	DBG("Exported GATT characteristic: %s", chrc->path);
 
 	return chrc;
@@ -1773,6 +1843,17 @@ static void unregister_characteristic(void *data)
 
 	g_dbus_unregister_interface(btd_get_dbus_connection(), chrc->path,
 						GATT_CHARACTERISTIC_IFACE);
+}
+
+static gboolean service_get_handle(const GDBusPropertyTable *property,
+					DBusMessageIter *iter, void *data)
+{
+	struct service *service = data;
+	uint16_t handle = service->start_handle;
+
+	dbus_message_iter_append_basic(iter, DBUS_TYPE_UINT16, &handle);
+
+	return TRUE;
 }
 
 static gboolean service_get_uuid(const GDBusPropertyTable *property,
@@ -1838,6 +1919,7 @@ static gboolean service_get_includes(const GDBusPropertyTable *property,
 }
 
 static const GDBusPropertyTable service_properties[] = {
+	{ "Handle", "q", service_get_handle },
 	{ "UUID", "s", service_get_uuid },
 	{ "Device", "o", service_get_device },
 	{ "Primary", "b", service_get_primary },
@@ -2157,82 +2239,6 @@ static void register_notify(void *data, void *user_data)
 	notify_client_free(notify_client);
 }
 
-static void eatt_connect_cb(GIOChannel *io, GError *gerr, gpointer user_data)
-{
-	struct btd_gatt_client *client = user_data;
-
-	if (gerr)
-		return;
-
-	device_attach_att(client->device, io);
-}
-
-static void eatt_connect(struct btd_gatt_client *client)
-{
-	struct bt_att *att = bt_gatt_client_get_att(client->gatt);
-	struct btd_device *dev = client->device;
-	struct btd_adapter *adapter = device_get_adapter(dev);
-	GIOChannel *io;
-	GError *gerr = NULL;
-	char addr[18];
-	int i;
-
-	if (bt_att_get_channels(att) == main_opts.gatt_channels)
-		return;
-
-	ba2str(device_get_address(dev), addr);
-
-	for (i = bt_att_get_channels(att); i < main_opts.gatt_channels; i++) {
-		int defer_timeout = i + 1 < main_opts.gatt_channels ? 1 : 0;
-
-		DBG("Connection attempt to: %s defer %s", addr,
-					defer_timeout ? "true" : "false");
-
-		/* Attempt to connect using the Ext-Flowctl */
-		io = bt_io_connect(eatt_connect_cb, client, NULL, &gerr,
-					BT_IO_OPT_SOURCE_BDADDR,
-					btd_adapter_get_address(adapter),
-					BT_IO_OPT_SOURCE_TYPE,
-					btd_adapter_get_address_type(adapter),
-					BT_IO_OPT_DEST_BDADDR,
-					device_get_address(dev),
-					BT_IO_OPT_DEST_TYPE,
-					device_get_le_address_type(dev),
-					BT_IO_OPT_MODE, BT_IO_MODE_EXT_FLOWCTL,
-					BT_IO_OPT_PSM, BT_ATT_EATT_PSM,
-					BT_IO_OPT_SEC_LEVEL, BT_IO_SEC_LOW,
-					BT_IO_OPT_MTU, main_opts.gatt_mtu,
-					BT_IO_OPT_DEFER_TIMEOUT, defer_timeout,
-					BT_IO_OPT_INVALID);
-		if (!io) {
-			g_error_free(gerr);
-			gerr = NULL;
-			/* Fallback to legacy LE Mode */
-			io = bt_io_connect(eatt_connect_cb, client, NULL, &gerr,
-					BT_IO_OPT_SOURCE_BDADDR,
-					btd_adapter_get_address(adapter),
-					BT_IO_OPT_SOURCE_TYPE,
-					btd_adapter_get_address_type(adapter),
-					BT_IO_OPT_DEST_BDADDR,
-					device_get_address(dev),
-					BT_IO_OPT_DEST_TYPE,
-					device_get_le_address_type(dev),
-					BT_IO_OPT_PSM, BT_ATT_EATT_PSM,
-					BT_IO_OPT_SEC_LEVEL, BT_IO_SEC_LOW,
-					BT_IO_OPT_MTU, main_opts.gatt_mtu,
-					BT_IO_OPT_INVALID);
-			if (!io) {
-				error("EATT bt_io_connect(%s): %s", addr,
-							gerr->message);
-				g_error_free(gerr);
-				return;
-			}
-		}
-
-		g_io_channel_unref(io);
-	}
-}
-
 void btd_gatt_client_ready(struct btd_gatt_client *client)
 {
 	if (!client)
@@ -2261,7 +2267,87 @@ void btd_gatt_client_ready(struct btd_gatt_client *client)
 		client->features = bt_gatt_client_get_features(client->gatt);
 		DBG("Update Features 0x%02x", client->features);
 		if (client->features & BT_GATT_CHRC_CLI_FEAT_EATT)
-			eatt_connect(client);
+			btd_gatt_client_eatt_connect(client);
+	}
+}
+
+static void eatt_connect_cb(GIOChannel *io, GError *gerr, gpointer user_data)
+{
+	struct btd_gatt_client *client = user_data;
+
+	if (gerr)
+		return;
+
+	device_attach_att(client->device, io);
+}
+
+void btd_gatt_client_eatt_connect(struct btd_gatt_client *client)
+{
+	struct bt_att *att = bt_gatt_client_get_att(client->gatt);
+	struct btd_device *dev = client->device;
+	struct btd_adapter *adapter = device_get_adapter(dev);
+	GIOChannel *io;
+	GError *gerr = NULL;
+	char addr[18];
+	int i;
+
+	if (!(client->features & BT_GATT_CHRC_CLI_FEAT_EATT) ||
+				!btd_device_is_initiator(dev))
+		return;
+
+	if (bt_att_get_channels(att) == btd_opts.gatt_channels)
+		return;
+
+	ba2str(device_get_address(dev), addr);
+
+	for (i = bt_att_get_channels(att); i < btd_opts.gatt_channels; i++) {
+		int defer_timeout = i + 1 < btd_opts.gatt_channels ? 1 : 0;
+
+		DBG("Connection attempt to: %s defer %s", addr,
+					defer_timeout ? "true" : "false");
+
+		/* Attempt to connect using the Ext-Flowctl */
+		io = bt_io_connect(eatt_connect_cb, client, NULL, &gerr,
+					BT_IO_OPT_SOURCE_BDADDR,
+					btd_adapter_get_address(adapter),
+					BT_IO_OPT_SOURCE_TYPE,
+					btd_adapter_get_address_type(adapter),
+					BT_IO_OPT_DEST_BDADDR,
+					device_get_address(dev),
+					BT_IO_OPT_DEST_TYPE,
+					device_get_le_address_type(dev),
+					BT_IO_OPT_MODE, BT_IO_MODE_EXT_FLOWCTL,
+					BT_IO_OPT_PSM, BT_ATT_EATT_PSM,
+					BT_IO_OPT_SEC_LEVEL, BT_IO_SEC_LOW,
+					BT_IO_OPT_MTU, btd_opts.gatt_mtu,
+					BT_IO_OPT_DEFER_TIMEOUT, defer_timeout,
+					BT_IO_OPT_INVALID);
+		if (!io) {
+			g_error_free(gerr);
+			gerr = NULL;
+			/* Fallback to legacy LE Mode */
+			io = bt_io_connect(eatt_connect_cb, client, NULL, &gerr,
+					BT_IO_OPT_SOURCE_BDADDR,
+					btd_adapter_get_address(adapter),
+					BT_IO_OPT_SOURCE_TYPE,
+					btd_adapter_get_address_type(adapter),
+					BT_IO_OPT_DEST_BDADDR,
+					device_get_address(dev),
+					BT_IO_OPT_DEST_TYPE,
+					device_get_le_address_type(dev),
+					BT_IO_OPT_PSM, BT_ATT_EATT_PSM,
+					BT_IO_OPT_SEC_LEVEL, BT_IO_SEC_LOW,
+					BT_IO_OPT_MTU, btd_opts.gatt_mtu,
+					BT_IO_OPT_INVALID);
+			if (!io) {
+				error("EATT bt_io_connect(%s): %s", addr,
+							gerr->message);
+				g_error_free(gerr);
+				return;
+			}
+		}
+
+		g_io_channel_unref(io);
 	}
 }
 
@@ -2285,11 +2371,6 @@ void btd_gatt_client_connected(struct btd_gatt_client *client)
 	 * for any pre-registered notification sessions.
 	 */
 	queue_foreach(client->all_notify_clients, register_notify, client);
-
-	if (!(client->features & BT_GATT_CHRC_CLI_FEAT_EATT))
-		return;
-
-	eatt_connect(client);
 }
 
 void btd_gatt_client_service_added(struct btd_gatt_client *client,

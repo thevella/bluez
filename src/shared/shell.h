@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: LGPL-2.1-or-later */
 /*
  *
  *  BlueZ - Bluetooth protocol stack for Linux
@@ -5,22 +6,9 @@
  *  Copyright (C) 2017  Intel Corporation. All rights reserved.
  *
  *
- *  This library is free software; you can redistribute it and/or
- *  modify it under the terms of the GNU Lesser General Public
- *  License as published by the Free Software Foundation; either
- *  version 2.1 of the License, or (at your option) any later version.
- *
- *  This library is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- *  Lesser General Public License for more details.
- *
- *  You should have received a copy of the GNU Lesser General Public
- *  License along with this library; if not, write to the Free Software
- *  Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
- *
  */
 #include <getopt.h>
+#include <stdbool.h>
 
 #define COLOR_OFF	"\001\x1B[0m\002"
 #define COLOR_RED	"\001\x1B[0;91m\002"
@@ -67,6 +55,7 @@ struct bt_shell_opt {
 void bt_shell_init(int argc, char **argv, const struct bt_shell_opt *opt);
 
 int bt_shell_run(void);
+int bt_shell_exec(const char *input);
 
 void bt_shell_quit(int status);
 void bt_shell_noninteractive_quit(int status);
@@ -80,6 +69,8 @@ bool bt_shell_remove_submenu(const struct bt_shell_menu *menu);
 void bt_shell_set_prompt(const char *string);
 
 void bt_shell_printf(const char *fmt,
+				...) __attribute__((format(printf, 1, 2)));
+void bt_shell_echo(const char *fmt,
 				...) __attribute__((format(printf, 1, 2)));
 void bt_shell_hexdump(const unsigned char *buf, size_t len);
 void bt_shell_usage(void);

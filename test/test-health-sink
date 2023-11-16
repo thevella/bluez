@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# SPDX-License-Identifier: LGPL-2.1-or-later
 
 from __future__ import absolute_import, print_function, unicode_literals
 # -*- coding: utf-8 -*-
@@ -40,7 +41,7 @@ manager = dbus.Interface(bus.get_object(BUS_NAME, "/"),
 objects = manager.GetManagedObjects()
 adapters = []
 
-for path, ifaces in objects.iteritems():
+for path, ifaces in objects.items():
 	if ifaces.has_key(ADAPTER_INTERFACE):
 		adapters.append(path)
 
@@ -66,7 +67,7 @@ adapter =  dbus.Interface(bus.get_object(BUS_NAME, select),
 						ADAPTER_INTERFACE)
 
 devices = []
-for path, interfaces in objects.iteritems():
+for path, interfaces in objects.items():
 	if "org.bluez.Device1" not in interfaces:
 		continue
 	properties = interfaces["org.bluez.Device1"]
