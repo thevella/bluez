@@ -4278,7 +4278,7 @@ static gboolean device_disappeared(gpointer user_data)
 
 	dev->temporary_timer = 0;
 
-	btd_adapter_remove_device(dev->adapter, dev);
+    btd_adapter_remove_device(dev->adapter, dev);
 
 	return FALSE;
 }
